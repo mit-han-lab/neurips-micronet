@@ -102,7 +102,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         mask = indices != target[:, None]
         probs.masked_fill_(mask, 0)
 
-        pos_prob = probs.sum(axis=1)
+        pos_prob = probs.sum(dim=1)
         self.cache_keys = cache_keys[-c.n_cache:]
         self.cache_values = cache_values[-c.n_cache:]
         return pos_prob
@@ -246,6 +246,7 @@ class Transformer(nn.Module):
 
         self.loss = ProjectedAdaptiveLogSoftmax(c)
 
+        # tie output embedding weights to input embedding weights
         for layer_embed, layer_loss in zip(self.embed.layers, self.loss.layers):
             layer_loss.weight = layer_embed.weight
 
@@ -384,6 +385,7 @@ def train(c):
                 scaled_loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
             opt.step()
+            
             if c.hebbian:
                 hebbian_weight_update(c, net, preds['hiddens'], counters, temp_counters)
 
