@@ -34,7 +34,7 @@ class SequentialIterator:
             start = n * c.local_rank // c.world_size
             end = n * (c.local_rank + 1) // c.world_size
 
-        span_i = (end - start) // bs
+        span_i = (end - start) // bs // c.eval_chunk * c.eval_chunk
         span = span_i * bs
         end = start + span
 

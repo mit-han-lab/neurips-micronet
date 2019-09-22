@@ -162,21 +162,36 @@ class Decoder(nn.Module):
     def __init__(self, c, layer_i):
         super(Decoder, self).__init__()
         self.layer_i = layer_i
-        
+        c_global = c
         c = Namespace(**c.layers[layer_i]).setdefault(
-            n_embed=c.n_embed, n_inner=c.n_inner, n_head=c.n_head, n_k=c.n_k, n_v=c.n_v, n_seq=c.n_seq, dropout=c.dropout, pos_emb=c.pos_emb
+            n_embed=c.n_embed, n_inner=c.n_inner, n_head=c.n_head, n_k=c.n_k, n_v=c.n_v, n_seq=c.n_seq, dropout=c.dropout, pos_emb=c.pos_emb,
+            light_conv=c.light_conv
         )
-
-        self.ln1 = nn.LayerNorm(c.n_embed)
-
-        self.qkv = nn.Linear(c.n_embed, c.n_head * (2 * c.n_k + c.n_v))
+        
+        n_embed = c.n_embed
+        if c.light_conv:
+            n_embed = c.n_embed // 2
+            c.setdefault(
+                decoder_conv_dim=c_global.decoder_conv_dim, kernel_size=c_global.light_conv_kernel_size, decoder_attention_heads=c_global.n_head,
+                decoder_glu=False, decoder_conv_type='dynamic',
+                decoder_embed_dim=n_embed, decoder_ffn_embed_dim=c.n_inner,
+                relu_dropout=0, input_dropout=0, weight_dropout=0, attention_dropout=0,
+                decoder_normalize_before=True, weight_softmax=False
+            )
+            import fairseq
+            self.light_conv = fairseq.fairseq.models.lightconv.LightConvDecoderLayer(c, no_encoder_attn=True, kernel_size=c.kernel_size)
+        
+        self.ln1 = nn.LayerNorm(n_embed)
+        
+        self.qkv = nn.Linear(n_embed, c.n_head * (2 * c.n_k + c.n_v))
         if c.pos_emb == 'trained':
             self.pos_emb = nn.Parameter(torch.Tensor(c.n_k, c.n_seq + 1))
             nn.init.normal_(self.pos_emb, 0, 0.02)
 
-        self.out = nn.Linear(c.n_head * c.n_v, c.n_embed, bias=False)
+        self.out = nn.Linear(c.n_head * c.n_v, n_embed, bias=False)
         self.dropout = nn.Dropout(c.dropout)
 
+        self.ln2 = nn.LayerNorm(c.n_embed)
         self.fc = nn.Sequential(
             nn.Linear(c.n_embed, c.n_inner),
             nn.ReLU(inplace=True),
@@ -184,7 +199,6 @@ class Decoder(nn.Module):
             nn.Linear(c.n_inner, c.n_embed),
             nn.Dropout(c.dropout),
         )
-        self.ln2 = nn.LayerNorm(c.n_embed)
         self.c = c
     
     def forward(self, x, prev=None):
@@ -199,6 +213,14 @@ class Decoder(nn.Module):
         n_h = c.n_head
         n_k = c.n_k
         n_v = c.n_v
+
+        if c.light_conv:
+            if prev is None:
+                state2 = {} # create new lightconv state
+            else:
+                prev, state2 = prev
+            x, x2 = x.chunk(2, dim=2)
+            out2, _ = self.light_conv(x2.transpose(0, 1), None, None, state2)
 
         qkv = self.qkv(self.ln1(x)).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
         q, kv = qkv.split([n_k, n_k + n_v], dim=-1)
@@ -231,13 +253,19 @@ class Decoder(nn.Module):
         attn_out = self.dropout(attn_out)
 
         out = x + attn_out
+        
+        next = kv[-n_s:].detach()
+        if c.light_conv:
+            out = torch.cat((out, out2.transpose(0, 1)), dim=2)
+            next = next, state2
+        out = out + self.fc(self.ln2(out))
 
-        return out + self.fc(self.ln2(out)), kv[-n_s:].detach()
+        return out, next
 
 class Transformer(nn.Module):
     def __init__(self, c):
         super(Transformer, self).__init__()
-        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)])
+        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False)
         self.embed = AdaptiveEmbedding(c)
 
         self.dropout = nn.Dropout(c.dropout)
@@ -276,6 +304,37 @@ class Transformer(nn.Module):
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
         loss = loss.reshape(labels.shape)[:n_gs]
         return dict(loss=loss.mean(), state=new_prevs, hiddens=hiddens)
+
+LSTM = nn.LSTM
+GRU = nn.GRU
+
+class RNN(nn.Module):
+    def __init__(self, c):
+        super(RNN, self).__init__()
+        self.c = c
+        self.embed = AdaptiveEmbedding(c)
+
+        self.dropout = nn.Dropout(c.dropout)
+
+        self.rnn = eval(c.net)(c.n_embed, c.n_embed, batch_first=True)
+        self.fc = nn.Linear(c.n_embed, c.n_embed)
+
+        self.loss = ProjectedAdaptiveLogSoftmax(c)
+
+        # tie output embedding weights to input embedding weights
+        for layer_embed, layer_loss in zip(self.embed.layers, self.loss.layers):
+            layer_loss.weight = layer_embed.weight
+
+    def forward(self, inputs, labels, prevs=None):
+        x = self.embed(inputs)
+        x, state = self.rnn(x.transpose(0, 1), prevs)
+        
+        x = self.fc(x)
+        x = self.dropout(x)
+        
+        loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
+        loss = loss.reshape(labels.shape)
+        return dict(loss=loss.mean(), state=state, hiddens=hiddens)
 
 get_net = lambda c: eval(c.model_class)(c)
 get_opt = lambda c, net: optim.Adam(net.parameters(), lr=c.lr)
@@ -385,7 +444,7 @@ def train(c):
                 scaled_loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
             opt.step()
-            
+
             if c.hebbian:
                 hebbian_weight_update(c, net, preds['hiddens'], counters, temp_counters)
 
