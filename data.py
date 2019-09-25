@@ -3,8 +3,8 @@ from ut import *
 
 class SampleIterator:
     def __init__(self, c, batch_size, split):
-        self.c = c.setdefault(train_chunk=c.n_seq)
-        self.tokens = (Cache / 'wikitext-103' / split + '.npy').load()
+        self.c = c.setdefault(train_chunk=c.n_seq, vocab_sorted=False)
+        self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()
         self.bs = batch_size
         np.random.seed(c.local_rank)
     
@@ -18,8 +18,8 @@ class SampleIterator:
 
 class SequentialIterator:
     def __init__(self, c, batch_size, split):
-        self.c = c
-        self.tokens = (Cache / 'wikitext-103' / split + '.npy').load()
+        self.c = c.setdefault(vocab_sorted=False)
+        self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()
         self.batch_size = batch_size
     
     def __iter__(self):

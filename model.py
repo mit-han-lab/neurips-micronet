@@ -171,15 +171,15 @@ class Decoder(nn.Module):
         n_embed = c.n_embed
         if c.light_conv:
             n_embed = c.n_embed // 2
-            c.setdefault(
-                decoder_conv_dim=c_global.decoder_conv_dim, kernel_size=c_global.light_conv_kernel_size, decoder_attention_heads=c_global.n_head,
-                decoder_glu=False, decoder_conv_type='dynamic',
-                decoder_embed_dim=n_embed, decoder_ffn_embed_dim=c.n_inner,
-                relu_dropout=0, input_dropout=0, weight_dropout=0, attention_dropout=0,
-                decoder_normalize_before=True, weight_softmax=False
-            )
+            c.n_head = c.n_head // 2
+            
             import fairseq
-            self.light_conv = fairseq.fairseq.models.lightconv.LightConvDecoderLayer(c, no_encoder_attn=True, kernel_size=c.kernel_size)
+            c.setdefault(lc_kernel_size=c_global.get('lc_kernel_size'))
+            
+            self.light_conv = fairseq.modules.LightweightConv(
+                n_embed, c.lc_kernel_size, padding_l=c.lc_kernel_size - 1, 
+                weight_softmax=False, num_heads=c.n_head, weight_dropout=0
+            )
         
         self.ln1 = nn.LayerNorm(n_embed)
         
@@ -216,11 +216,11 @@ class Decoder(nn.Module):
 
         if c.light_conv:
             if prev is None:
-                state2 = {} # create new lightconv state
+                incremental_state = {} # create new lightconv state
             else:
-                prev, state2 = prev
+                prev, incremental_state = prev
             x, x2 = x.chunk(2, dim=2)
-            out2, _ = self.light_conv(x2.transpose(0, 1), None, None, state2)
+            out2 = self.light_conv(x2.transpose(0, 1).contiguous(), incremental_state=incremental_state)
 
         qkv = self.qkv(self.ln1(x)).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
         q, kv = qkv.split([n_k, n_k + n_v], dim=-1)
@@ -257,7 +257,7 @@ class Decoder(nn.Module):
         next = kv[-n_s:].detach()
         if c.light_conv:
             out = torch.cat((out, out2.transpose(0, 1)), dim=2)
-            next = next, state2
+            next = next, incremental_state
         out = out + self.fc(self.ln2(out))
 
         return out, next
@@ -305,9 +305,6 @@ class Transformer(nn.Module):
         loss = loss.reshape(labels.shape)[:n_gs]
         return dict(loss=loss.mean(), state=new_prevs, hiddens=hiddens)
 
-LSTM = nn.LSTM
-GRU = nn.GRU
-
 class RNN(nn.Module):
     def __init__(self, c):
         super(RNN, self).__init__()
@@ -316,8 +313,14 @@ class RNN(nn.Module):
 
         self.dropout = nn.Dropout(c.dropout)
 
-        self.rnn = eval(c.net)(c.n_embed, c.n_embed, batch_first=True)
-        self.fc = nn.Linear(c.n_embed, c.n_embed)
+        LSTM = nn.LSTM
+        GRU = nn.GRU
+        self.rnn = eval(c.net)(c.n_embed, c.n_hidden, num_layers=c.num_layers, dropout=c.dropout)
+        self.fc = nn.Sequential(
+            nn.Linear(c.n_hidden, c.n_embed),
+            nn.ReLU(inplace=True),
+            nn.LayerNorm(c.n_embed)
+        )            
 
         self.loss = ProjectedAdaptiveLogSoftmax(c)
 
@@ -327,7 +330,7 @@ class RNN(nn.Module):
 
     def forward(self, inputs, labels, prevs=None):
         x = self.embed(inputs)
-        x, state = self.rnn(x.transpose(0, 1), prevs)
+        x, state = self.rnn(x, prevs)
         
         x = self.fc(x)
         x = self.dropout(x)
@@ -335,6 +338,70 @@ class RNN(nn.Module):
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
         loss = loss.reshape(labels.shape)
         return dict(loss=loss.mean(), state=state, hiddens=hiddens)
+
+class UniversalTransformer(nn.Module):
+    def __init__(self, c):
+        super(Transformer, self).__init__()
+        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False)
+        self.embed = AdaptiveEmbedding(c)
+
+        self.dropout = nn.Dropout(c.dropout)
+
+        self.should_halt = nn.Linear(c.n_embed, 1)
+
+        self.layer = Decoder(c, 0)
+
+        self.loss = ProjectedAdaptiveLogSoftmax(c)
+
+        # tie output embedding weights to input embedding weights
+        for layer_embed, layer_loss in zip(self.embed.layers, self.loss.layers):
+            layer_loss.weight = layer_embed.weight
+
+    def forward(self, inputs, labels, prevs=None):
+        # inputs: (n_gs, n_b)
+
+        c = self.c
+
+        n_gs = inputs.size(0)
+        n_s = c.n_seq
+        if n_gs % n_s != 0:
+            padding = torch.zeros((n_s - n_gs % n_s, inputs.size(1)), dtype=inputs.dtype, device=inputs.device)
+            inputs = torch.cat((inputs, padding))
+            labels = torch.cat((labels, padding))
+        
+        x = self.embed(inputs)
+        x = self.dropout(x)
+
+        p_halt = torch.zeros(n_gs, dtype=x.dtype, device=x.device)
+        i_loop = 0
+        while i_loops < c.n_loops and (p_halt < c.thres_halt).any():
+            p_halt_i = self.should_halt(x).sigmoid()
+            running = p_halt < 1
+            
+            new_halted = running & ((p_halt + p_halt_i) > c.thres_halt)
+            running = running & ~new_halted
+
+            p_halt = p_halt + p_halt_i
+            i_loops += 1
+
+
+        total_p_halt = 0
+
+
+
+
+
+        prevs = prevs or [None] * len(self.layers)
+        new_prevs = []
+        for layer, prev in zip(self.layers, prevs):
+            x, prev = layer(x, prev=prev)
+            new_prevs.append(prev)
+        
+        x = self.dropout(x)
+
+        loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
+        loss = loss.reshape(labels.shape)[:n_gs]
+        return dict(loss=loss.mean(), state=new_prevs, hiddens=hiddens)
 
 get_net = lambda c: eval(c.model_class)(c)
 get_opt = lambda c, net: optim.Adam(net.parameters(), lr=c.lr)
@@ -438,11 +505,15 @@ def train(c):
             loss = preds['loss']
 
             opt.zero_grad()
+            skip_gradient = loss.abs() > 1e3
             if torch.isnan(loss):
                 raise RuntimeError('Encountered nan loss during training')
             with amp.scale_loss(loss, opt) as scaled_loss:
                 scaled_loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+            if skip_gradient:
+                c.log('Loss magnitude %s, skipping' % from_torch(loss))
+                opt.zero_grad()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), c.get('clip_grad', 0.5))
             opt.step()
 
             if c.hebbian:
