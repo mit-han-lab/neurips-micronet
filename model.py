@@ -241,11 +241,12 @@ class Decoder(nn.Module):
         attn.mul_(n_k ** -0.5)
         
         if prev is None:
-            mask = torch.triu(torch.ones(attn.shape[2:], dtype=torch.uint8, device=attn.device), 1).flip([1])
             if c.mask_pad:
+                mask = torch.triu(torch.ones(attn.shape[2:], dtype=torch.uint8, device=attn.device), 1).flip([1])
                 attn[0].masked_fill_(mask, -np.inf)
-            else:
-                qk[0].masked_fill_(mask, -np.inf) # legacy code for compatibility
+            # else:
+                # mask = torch.triu(torch.ones(attn.shape[2:], dtype=torch.uint8, device=attn.device), 1).flip([1])
+                # qk[0].masked_fill_(mask, -np.inf) # legacy code for compatibility
         if c.fix_softmax:
             attn = attn.softmax(dim=-1)
         else:

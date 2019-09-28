@@ -1,24 +1,28 @@
 adaptive_ratio: 4
 cutoffs:
-- 5000
+- 3500
 - 25000
-- 50000
 dropout: 0.1
 eval_batch: 1
 eval_chunk: 4096
+fix_softmax: true
 hebbian: true
-hebbian_T: 2500
-hebbian_gamma: 0.002
+hebbian_T: 500
+hebbian_gamma: 0.01
 lr: 0.0005
 model: /data/scratch/zxyan/micronet/model.py
 model_class: Transformer
 n_embed: 512
+n_embeds:
+- 512
+- 256
+- 16
 n_head: 8
-n_inner: 1024
-n_k: 32
+n_inner: 1536
+n_k: 64
 n_layers: 16
-n_seq: 128
-n_v: 32
+n_seq: 96
+n_v: 64
 n_vocab: 267735
 opt_level: O0
 pos_emb: trained
@@ -26,5 +30,6 @@ scheduler: cosine
 step_eval: 500
 step_save: 5000
 step_warmup: 100
-train_batch: 8
+train_batch: 7
 train_chunk: 1152
+vocab_sorted: true
