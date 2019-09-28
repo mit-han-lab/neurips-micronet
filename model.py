@@ -77,6 +77,9 @@ class Decoder(nn.Module):
         attn = qk + qe
         attn.mul_(n_k ** -0.5)
         
+        if prev is None and c.mask_pad:
+            mask = torch.triu(torch.ones(attn.shape[2:], dtype=torch.uint8, device=attn.device), 1).flip([1])
+            attn[0].masked_fill_(mask, -np.inf)
         if c.fix_softmax:
             attn = attn.softmax(dim=-1)
         else:

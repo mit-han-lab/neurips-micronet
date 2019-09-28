@@ -5,9 +5,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-Scratch = Path("/home/demi/projects")
-
-Proj = Scratch / 'micronet'
+Proj = Path(__file__)._up
 Cache = Proj / 'cache'
 Data = Proj / 'data'
 
