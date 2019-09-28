@@ -10,7 +10,6 @@ hebbian: true
 hebbian_T: 2500
 hebbian_gamma: 0.002
 lr: 0.0005
-mask_pad: true
 model: /data/scratch/zxyan/micronet/model.py
 model_class: Transformer
 n_embed: 512
