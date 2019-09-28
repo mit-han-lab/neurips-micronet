@@ -165,7 +165,7 @@ class Decoder(nn.Module):
         c_global = c
         c = Namespace(**c.layers[layer_i]).setdefault(
             n_embed=c.n_embed, n_inner=c.n_inner, n_head=c.n_head, n_k=c.n_k, n_v=c.n_v, n_seq=c.n_seq, dropout=c.dropout, pos_emb=c.pos_emb,
-            light_conv=c.light_conv
+            mask_pad=c.mask_pad, fix_softmax=c.fix_softmax, light_conv=c.light_conv
         )
         
         n_embed = c.n_embed
@@ -241,9 +241,15 @@ class Decoder(nn.Module):
         attn.mul_(n_k ** -0.5)
         
         if prev is None:
-            mask = torch.triu(torch.ones(qk.shape[2:], dtype=torch.uint8, device=qk.device), 1).flip([1])
-            qk[0].masked_fill_(mask, -np.inf)
-        attn.softmax(dim=-1)
+            mask = torch.triu(torch.ones(attn.shape[2:], dtype=torch.uint8, device=attn.device), 1).flip([1])
+            if c.mask_pad:
+                attn[0].masked_fill_(mask, -np.inf)
+            else:
+                qk[0].masked_fill_(mask, -np.inf) # legacy code for compatibility
+        if c.fix_softmax:
+            attn = attn.softmax(dim=-1)
+        else:
+            attn.softmax(dim=-1)
 
         attn = F.pad(attn, (0, n_s))
         attn = attn.reshape(n_g, n_b * n_h, -1).unfold(2, 2 * n_s, 2 * n_s) # (n_g, n_bh, n_s, 2 * n_s)
@@ -265,12 +271,21 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, c):
         super(Transformer, self).__init__()
-        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False)
+        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False, mask_pad=False, fix_softmax=False, tie_layers=False)
         self.embed = AdaptiveEmbedding(c)
 
         self.dropout = nn.Dropout(c.dropout)
 
-        self.layers = nn.ModuleList(Decoder(c, i) for i in range(c.n_layers))
+        if c.tie_layers:
+            if c.tie_layers is True:
+                self.layer = Decoder(c, 0)
+                self.layers = [self.layer] * c.n_layers
+            else: # tie_layers is a list of how many repeats
+                assert sum(c.tie_layers) == c.n_layers
+                self.layers_base = nn.ModuleList([Decoder(c, i) for i in range(len(c.tie_layers))])
+                self.layers = [layer for i, layer in enumerate(self.layers_base) for j in range(c.tie_layers[i])]
+        else:
+            self.layers = nn.ModuleList(Decoder(c, i) for i in range(c.n_layers))
 
         self.loss = ProjectedAdaptiveLogSoftmax(c)
 
@@ -293,17 +308,17 @@ class Transformer(nn.Module):
         x = self.embed(inputs)
         x = self.dropout(x)
 
-        prevs = prevs or [None] * len(self.layers)
-        new_prevs = []
+        prevs = prevs or [None] * c.n_layers
+        nexts = []
         for layer, prev in zip(self.layers, prevs):
             x, prev = layer(x, prev=prev)
-            new_prevs.append(prev)
+            nexts.append(prev)
         
         x = self.dropout(x)
 
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
         loss = loss.reshape(labels.shape)[:n_gs]
-        return dict(loss=loss.mean(), state=new_prevs, hiddens=hiddens)
+        return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
 
 class RNN(nn.Module):
     def __init__(self, c):
@@ -341,13 +356,13 @@ class RNN(nn.Module):
 
 class UniversalTransformer(nn.Module):
     def __init__(self, c):
-        super(Transformer, self).__init__()
+        super(UniversalTransformer, self).__init__()
         self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False)
         self.embed = AdaptiveEmbedding(c)
 
         self.dropout = nn.Dropout(c.dropout)
 
-        self.should_halt = nn.Linear(c.n_embed, 1)
+        self.new_halt = nn.Linear(c.n_embed, 1)
 
         self.layer = Decoder(c, 0)
 
@@ -359,8 +374,8 @@ class UniversalTransformer(nn.Module):
 
     def forward(self, inputs, labels, prevs=None):
         # inputs: (n_gs, n_b)
-
         c = self.c
+        prevs = prevs or [None] * c.n_layers
 
         n_gs = inputs.size(0)
         n_s = c.n_seq
@@ -372,36 +387,44 @@ class UniversalTransformer(nn.Module):
         x = self.embed(inputs)
         x = self.dropout(x)
 
-        p_halt = torch.zeros(n_gs, dtype=x.dtype, device=x.device)
-        i_loop = 0
-        while i_loops < c.n_loops and (p_halt < c.thres_halt).any():
-            p_halt_i = self.should_halt(x).sigmoid()
-            running = p_halt < 1
+        p = torch.zeros_like(inputs, dtype=x.dtype).unsqueeze(2) # shape (n_group_seq, n_batch, 1)
+        running = torch.ones_like(p, dtype=torch.bool) # positions that are still running
+        remainders = torch.zeros_like(p)
+        n_updates = torch.zeros_like(running, dtype=torch.half)
+        i_layer = 0
+        nexts = []
+        while i_layer < c.n_layers and running.any():
+            n_updates += running.half()
+
+            # addition halting probability at this iteration
+            h = self.new_halt(x).sigmoid()
+
+            # all the halted / running positions for the next iteration
+            # halt if p + h > threshold
+            next_running = ((p + h) <= c.threshold) & running # still running after this loop
+            new_halted = (running ^ next_running).to(h.dtype)
+
+            remainders = remainders + new_halted * (1 - p)
+
+            # increase p by h if still running, by remainder if halted
+            update_weights = h * (next_running).to(h.dtype) + remainders * new_halted
+            p = p + update_weights
             
-            new_halted = running & ((p_halt + p_halt_i) > c.thres_halt)
-            running = running & ~new_halted
-
-            p_halt = p_halt + p_halt_i
-            i_loops += 1
-
-
-        total_p_halt = 0
-
-
-
-
-
-        prevs = prevs or [None] * len(self.layers)
-        new_prevs = []
-        for layer, prev in zip(self.layers, prevs):
-            x, prev = layer(x, prev=prev)
-            new_prevs.append(prev)
+            x_new, next = self.layer(x, prev=prevs[i_layer])
+            nexts.append(next)
+            x = x_new * update_weights + x * (1 - update_weights)
+            running = next_running
+            i_layer += 1
+        
+        while len(nexts) < c.n_layers: # duplicate last layer activation
+            nexts.append(nexts[-1])
         
         x = self.dropout(x)
 
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
-        loss = loss.reshape(labels.shape)[:n_gs]
-        return dict(loss=loss.mean(), state=new_prevs, hiddens=hiddens)
+        loss = loss.reshape(labels.shape)[:n_gs].mean()
+        act_loss = c.time_penalty * remainders.mean()
+        return dict(loss=loss, act_loss=act_loss, state=nexts, hiddens=hiddens, n_updates=n_updates.mean())
 
 get_net = lambda c: eval(c.model_class)(c)
 get_opt = lambda c, net: optim.Adam(net.parameters(), lr=c.lr)
@@ -503,16 +526,19 @@ def train(c):
             inputs, labels = x[:-1], x[1:]
             preds = net(inputs, labels)
             loss = preds['loss']
+            if c.model_class == 'UniversalTransformer':
+                act_loss = preds['act_loss']
+                total_loss = act_loss + loss
+                extras = dict(act_loss=from_torch(act_loss), n_updates=from_torch(preds['n_updates'].mean()))
+            else:
+                total_loss = loss
+                extras = {}
 
             opt.zero_grad()
-            skip_gradient = loss.abs() > 1e3
-            if torch.isnan(loss):
+            if torch.isnan(total_loss):
                 raise RuntimeError('Encountered nan loss during training')
-            with amp.scale_loss(loss, opt) as scaled_loss:
+            with amp.scale_loss(total_loss, opt) as scaled_loss:
                 scaled_loss.backward()
-            if skip_gradient:
-                c.log('Loss magnitude %s, skipping' % from_torch(loss))
-                opt.zero_grad()
             torch.nn.utils.clip_grad_norm_(net.parameters(), c.get('clip_grad', 0.5))
             opt.step()
 
@@ -526,7 +552,8 @@ def train(c):
             step_result = pd.Series(Dict(
                 loss=loss,
                 perplexity=perplexity,
-                time=time_model
+                time=time_model,
+                **extras
             )).add_prefix('train_')
             step_result['lr'] = next(iter(opt.param_groups))['lr']
 
