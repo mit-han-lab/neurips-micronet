@@ -2,3 +2,4 @@ __pycache__
 .ipynb_checkpoints
 cache
 wikitext-103
+.idea/

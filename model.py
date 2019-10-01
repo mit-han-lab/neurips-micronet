@@ -152,6 +152,10 @@ class Transformer(nn.Module):
         x = self.dropout(x)
 
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
+        if c.get('gen_soft'):
+            # loss = loss.reshape(labels.shape)[:n_gs]
+            return loss, hiddens
+
         loss = loss.reshape(labels.shape)[:n_gs]
         return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
 

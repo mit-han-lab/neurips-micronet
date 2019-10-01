@@ -118,6 +118,18 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             cache_prob = self.query_cache(hidden, target)
 
         head_logit = torch.cat((self.layers[0](hidden), self.clusters(hidden)), dim=1)
+
+        if c.get('gen_soft'):
+            head_prob = head_logit.softmax(dim=1)
+            all_prob = head_prob[:, :-len(c.cutoffs)]
+            for i in range(len(c.cutoffs)):
+                proj_i = self.projections[i](hidden)
+                tail_logit_i = self.layers[i + 1](proj_i)
+                tail_prob_i = tail_logit_i.softmax(dim=1)
+                tail_prob_i = tail_prob_i * head_prob[:, -(i + 1)].unsqueeze(1)
+                all_prob = torch.cat((all_prob, tail_prob_i), dim=1)
+            return all_prob, None
+
         head_logprob = head_logit.log_softmax(dim=1)
 
         nll = torch.zeros_like(target, dtype=hidden.dtype, device=hidden.device)
