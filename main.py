@@ -27,7 +27,7 @@ from model import get_net, Transformer
 from modules import hebbian_weight_update
 from optim import scheduler, get_opt 
 from ut import count_params, to_torch, from_torch
-from data import SampleIterator, SequentialIterator
+from data import SampleIterator, SequentialIterator, DistillationSampleIterator
 
 def train(c):
     c.setdefault(hebbian=False)
@@ -36,6 +36,9 @@ def train(c):
     emb_params = count_params(net.embed) + count_params(net.loss.projections) + count_params(net.loss.clusters)
     opt = get_opt(c, net)
     net, opt, step = c.init_model(net, opt=opt, step='max', train=True)
+    if c.get('distillation_teacher') == 'file':
+        data_tr_distill = DistillationSampleIterator(c, c.train_batch, split='train')
+        iter_tr_distill = iter(data_tr_distill)
 
     step_lr = scheduler(c, opt, step)
     data_tr = SampleIterator(c, c.train_batch, split='valid' if c.debug else 'train')
@@ -58,19 +61,43 @@ def train(c):
         while step < s.step_max:
             step_lr(step)
 
-            x = to_torch(next(iter_tr), c.device).t()
+            if c.get('distillation_teacher') == 'file':
+                x_hard_labels, x_soft_labels, x_soft_probs = next(iter_tr_distill)
 
-            t_s = time()
-            inputs, labels = x[:-1], x[1:]
-            preds = net(inputs, labels)
-            loss = preds['loss']
-            if c.model_class == 'UniversalTransformer':
-                act_loss = preds['act_loss']
-                total_loss = act_loss + loss
-                extras = dict(act_loss=from_torch(act_loss), n_updates=from_torch(preds['n_updates'].mean()))
-            else:
+                x_hard_labels = to_torch(x_hard_labels, c.device).t()
+
+                x_soft_labels = to_torch(x_soft_labels, c.device)
+                x_soft_labels = x_soft_labels.permute(1, 0, 2)
+
+                x_soft_probs = to_torch(x_soft_probs, c.device)
+                x_soft_probs = x_soft_probs.permute(1, 0, 2)
+
+                inputs, hard_labels = x_hard_labels[:-1], x_hard_labels[1:]
+                soft_labels = x_soft_labels[1:]
+                soft_probs = x_soft_probs[1:]
+
+                t_s = time()
+
+                preds = net(inputs=inputs, labels=hard_labels, soft_labels=soft_labels, soft_probs=soft_probs,
+                            is_distilling=True, current_step=step)
+                loss = preds['loss']
                 total_loss = loss
                 extras = {}
+
+            else:
+                x = to_torch(next(iter_tr), c.device).t()
+
+                t_s = time()
+                inputs, labels = x[:-1], x[1:]
+                preds = net(inputs, labels)
+                loss = preds['loss']
+                if c.model_class == 'UniversalTransformer':
+                    act_loss = preds['act_loss']
+                    total_loss = act_loss + loss
+                    extras = dict(act_loss=from_torch(act_loss), n_updates=from_torch(preds['n_updates'].mean()))
+                else:
+                    total_loss = loss
+                    extras = {}
 
             opt.zero_grad()
             if torch.isnan(total_loss):
