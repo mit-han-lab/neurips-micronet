@@ -253,8 +253,8 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 hiddens[i] = (proj_i.detach(), target_i)
             
             if c.use_cache:
-                logprob_i = (c.cache_lambda * cache_prob_i + (1 - c.cache_lambda) * logprob_i.exp()).log()
-
+                logprob_i = (c.cache_lambda * (cache_prob_i+1e-8) + (1 - c.cache_lambda) * logprob_i.exp()).log()
+                # logprob_i = torch.stack([(c.cache_lambda * cache_prob_i).log(), np.log(1 - c.cache_lambda) + logprob_i]).logsumexp(dim=0)
             if keep_order:
                 nll.index_copy_(0, indices_i, -logprob_i)
             else:
