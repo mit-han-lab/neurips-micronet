@@ -176,20 +176,24 @@ def evaluate(c, data, net):
 
 def evaluate_cache_search(config):
     net, step = config.var(device="cuda:0").load_model("max")
+    print(step)
 
     # search best cache hyperparamters on validation
     data_val = SequentialIterator(config,config.eval_batch, split="valid")
-    thetas = [1e-2, 9e-3, 8e-3, 7e-3, 6e-3, 5e-3, 4e-3, 3e-3, 2e-3, 1e-3]
-    lambdas = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
+    thetas = [1.2e-2, 1.1e-2, 1e-2, 9e-3, 8e-3, 7e-3, 6e-3, 5e-3, 4e-3, 3e-3, 2e-3, 1e-3]
+    lambdas = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
     best_theta = -1
     best_lambda = -1
     best_ppl = 1000000
+    perplexity = {}
     for theta in thetas:
         for lam in lambdas:
             if (theta, lam) in perplexity:
                 continue
             net.loss.cache_keys = net.loss.cache_values = None
-            perplexity[theta, lam] = evaluate(c.var(use_cache=True, n_cache=500, cache_theta=theta, cache_lambda=lam), data_val, net)['perplexity']
+            perplexity[theta, lam] = evaluate(config.var(use_cache=True, n_cache=500, cache_theta=theta, cache_lambda=lam), data_val, net)['perplexity']
+            print(perplexity[theta, lam])
+
             if perplexity[theta, lam] < best_ppl:
                 best_theta = theta
                 best_lambda = lam
@@ -197,7 +201,7 @@ def evaluate_cache_search(config):
 
     # evaluate on test
     data_test = SequentialIterator(config, config.eval_batch, split="test")
-    eval_output = evaluate(config.var(use_cache=True, n_cache=500, cache_thetaa=best_theta, cache_lambda=best_lambda), data_test, net)
+    eval_output = evaluate(config.var(use_cache=True, n_cache=500, cache_theta=best_theta, cache_lambda=best_lambda), data_test, net)
     config.log("TEST RESULT: %s" % eval_output)
     return eval_output
 
