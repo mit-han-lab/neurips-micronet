@@ -13,6 +13,8 @@ from ut import Namespace
 from modules import AdaptiveEmbedding
 from modules import ProjectedAdaptiveLogSoftmax
 
+from tensor_train import TTLayer
+
 get_net = lambda c: eval(c.model_class)(c)
 
 class Decoder(nn.Module):
@@ -22,10 +24,21 @@ class Decoder(nn.Module):
         c_global = c
         c = Namespace(**c.layers[layer_i]).setdefault(
             n_embed=c.n_embed, n_inner=c.n_inner, n_head=c.n_head, n_k=c.n_k, n_v=c.n_v, n_seq=c.n_seq, dropout=c.dropout, pos_emb=c.pos_emb,
-            mask_pad=c.mask_pad, fix_softmax=c.fix_softmax, light_conv=c.light_conv
+            mask_pad=c.mask_pad, fix_softmax=c.fix_softmax, light_conv=c.light_conv, tensor_train=c.tensor_train
         )
         
         n_embed = c.n_embed
+        if c.light_conv:
+            n_embed = c.n_embed // 2
+            c.n_head = c.n_head // 2
+            
+            import fairseq
+            c.setdefault(lc_kernel_size=c_global.get('lc_kernel_size'))
+            
+            self.light_conv = fairseq.modules.LightweightConv(
+                n_embed, c.lc_kernel_size, padding_l=c.lc_kernel_size - 1, 
+                weight_softmax=False, num_heads=c.n_head, weight_dropout=0
+            )
        
         self.ln1 = nn.LayerNorm(n_embed)
         
@@ -39,10 +52,10 @@ class Decoder(nn.Module):
 
         self.ln2 = nn.LayerNorm(c.n_embed)
         self.fc = nn.Sequential(
-            nn.Linear(c.n_embed, c.n_inner),
+            TTLayer(c_global.modes_embed, c_global.modes_inner, c_global.ranks_e2i) if c.tensor_train else nn.Linear(c.n_embed, c.n_inner),
             nn.ReLU(inplace=True),
             nn.Dropout(c.dropout),
-            nn.Linear(c.n_inner, c.n_embed),
+            TTLayer(c_global.modes_inner, c_global.modes_embed, c_global.ranks_i2e) if c.tensor_train else nn.Linear(c.n_inner, c.n_embed),
             nn.Dropout(c.dropout),
         )
         self.c = c
@@ -59,6 +72,14 @@ class Decoder(nn.Module):
         n_h = c.n_head
         n_k = c.n_k
         n_v = c.n_v
+        
+        if c.light_conv:
+            if prev is None:
+                incremental_state = {} # create new lightconv state
+            else:
+                prev, incremental_state = prev
+            x, x2 = x.chunk(2, dim=2)
+            out2 = self.light_conv(x2.transpose(0, 1).contiguous(), incremental_state=incremental_state)
 
         qkv = self.qkv(self.ln1(x)).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
         q, kv = qkv.split([n_k, n_k + n_v], dim=-1)
@@ -99,6 +120,7 @@ class Decoder(nn.Module):
         if c.light_conv:
             out = torch.cat((out, out2.transpose(0, 1)), dim=2)
             next = next, incremental_state
+
         out = out + self.fc(self.ln2(out))
 
         return out, next
@@ -106,7 +128,7 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, c):
         super(Transformer, self).__init__()
-        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False, mask_pad=False, fix_softmax=False, tie_layers=False)
+        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False, mask_pad=False, fix_softmax=False, tie_layers=False, tensor_train=False)
         self.embed = AdaptiveEmbedding(c)
 
         self.dropout = nn.Dropout(c.dropout)
