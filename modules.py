@@ -108,7 +108,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         self.cache_values = cache_values[-c.n_cache:]
         return pos_prob
         
-    def forward(self, hidden, target, keep_order=False):
+    def forward(self, hidden, target, keep_order=False, soft_labels=None, soft_probs=None, is_distilling=False, current_step=0.):
         # hidden: (n_seq * n_batch, n_embed)
         # target: (n_seq * n_batch)
         c = self.c
@@ -118,6 +118,110 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             cache_prob = self.query_cache(hidden, target)
 
         head_logit = torch.cat((self.layers[0](hidden), self.clusters(hidden)), dim=1)
+
+        if c.get('gen_soft'):
+            head_prob = head_logit.softmax(dim=1)
+            all_prob = head_prob[:, :-len(c.cutoffs)]
+            for i in range(len(c.cutoffs)):
+                proj_i = self.projections[i](hidden)
+                tail_logit_i = self.layers[i + 1](proj_i)
+                tail_prob_i = tail_logit_i.softmax(dim=1)
+                tail_prob_i = tail_prob_i * head_prob[:, -(i + 1)].unsqueeze(1)
+                all_prob = torch.cat((all_prob, tail_prob_i), dim=1)
+            return all_prob, None
+
+
+        if c.get('distillation_teacher') == 'file' and is_distilling:
+            head_logprob = head_logit.log_softmax(dim=1)
+
+            nll = torch.zeros_like(target, dtype=hidden.dtype, device=hidden.device)
+            distill_loss = torch.zeros_like(target, dtype=hidden.dtype, device=hidden.device)
+            topk = soft_labels.size(1)
+            hiddens = {}
+            offset = 0
+            for i, (start, end) in enumerate(zip([0] + c.cutoffs, c.cutoffs + [c.n_vocab])):
+                mask_i = (target >= start) & (target < end)
+
+                if c.use_cache:
+                    cache_prob_i = cache_prob[mask_i]
+
+                indices_i = mask_i.nonzero().squeeze()
+
+                if indices_i.numel() == 0:
+                    continue
+
+                target_i = (target.index_select(0, indices_i) - start)[:, None]
+                head_logprob_i = head_logprob.index_select(0, indices_i)
+
+                soft_labels_i = (soft_labels.index_select(0, indices_i))
+                soft_probs_i = (soft_probs.index_select(0, indices_i))
+                soft_labels_i = soft_labels_i.reshape(-1)
+                soft_probs_i = soft_probs_i.reshape(-1)
+
+                mask_soft_labels_i = (soft_labels_i >= start) & (soft_labels_i < end)
+
+                # those in the bin need to be substracted
+                masked_soft_labels_i = mask_soft_labels_i.type(soft_labels_i.type()) * (soft_labels_i - start)
+                masked_soft_probs_i = mask_soft_labels_i.type(soft_probs_i.type()) * soft_probs_i
+
+                masked_soft_labels_i = masked_soft_labels_i.reshape(-1, topk)
+                masked_soft_probs_i = masked_soft_probs_i.reshape(-1, topk)
+
+                masked_soft_probs_i = masked_soft_probs_i + 1e-8
+
+                # normalize soft_probs_i to sum=1 as the flag indicated
+                if c.get('no_normalize') != 1:
+                    masked_soft_probs_i = masked_soft_probs_i / masked_soft_probs_i.sum(axis=1).unsqueeze(1)
+
+                if i == 0:
+                    hiddens[i] = (hidden.detach().index_select(0, indices_i), target_i)
+                    logprob_i = head_logprob_i.gather(1, target_i).squeeze(1)
+
+                    logprob_distill_i = torch.gather(head_logprob_i, 1, masked_soft_labels_i)
+
+                    distill_loss_i = torch.bmm(
+                        logprob_distill_i.view(logprob_distill_i.size(0), 1, logprob_distill_i.size(1)),
+                        masked_soft_probs_i.view(masked_soft_probs_i.size(0), masked_soft_probs_i.size(1), 1))
+                    distill_loss_i = distill_loss_i.squeeze()
+
+                else:
+                    hidden_i = hidden.index_select(0, indices_i)
+                    proj_i = self.projections[i - 1](hidden_i)
+                    tail_logit_i = self.layers[i](proj_i)
+                    tail_logprob_i = tail_logit_i.log_softmax(dim=1)
+
+                    logprob_i = head_logprob_i[:, -i] + tail_logprob_i.gather(1, target_i).squeeze(1)
+
+                    logprob_distill_i = head_logprob_i[:, -i].unsqueeze(1) + torch.gather(tail_logprob_i, 1,
+                                                                                          masked_soft_labels_i)
+
+                    hiddens[i] = (proj_i.detach(), target_i)
+                    # logprob_distill_i = torch.gather(logprob_distill_i_all, 1, masked_soft_labels_i)
+
+                    distill_loss_i = torch.bmm(
+                        logprob_distill_i.view(logprob_distill_i.size(0), 1, logprob_distill_i.size(1)),
+                        masked_soft_probs_i.view(masked_soft_probs_i.size(0), masked_soft_probs_i.size(1), 1))
+                    distill_loss_i = distill_loss_i.squeeze()
+                if c.use_cache:
+                    logprob_i = (c.cache_lambda * cache_prob_i + (1 - c.cache_lambda) * logprob_i.exp()).log()
+
+                if keep_order:
+                    nll.index_copy_(0, indices_i, -logprob_i)
+                    distill_loss.index_copy_(0, indices_i, -distill_loss_i)
+
+                else:
+                    nll[offset: offset + logprob_i.size(0)].copy_(-logprob_i)
+                    distill_loss[offset: offset + distill_loss_i.size(0)].copy_(-distill_loss_i)
+                    offset += logprob_i.size(0)
+
+            if c.get('teacher_annealing'):
+                hard_ratio = c.get('annealing_hard_min') + min(1, current_step / c.get('total_step')) * (c.get('annealing_hard_max') - c.get('annealing_hard_min'))
+                # print(hard_ratio)
+                return hard_ratio * nll + (1 - hard_ratio) * distill_loss, hiddens
+
+            return c.get('hard_lambda') * nll + c.get('soft_lambda') * distill_loss, hiddens
+
+
         head_logprob = head_logit.log_softmax(dim=1)
 
         nll = torch.zeros_like(target, dtype=hidden.dtype, device=hidden.device)
@@ -149,8 +253,8 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 hiddens[i] = (proj_i.detach(), target_i)
             
             if c.use_cache:
-                logprob_i = (c.cache_lambda * cache_prob_i + (1 - c.cache_lambda) * logprob_i.exp()).log()
-
+                # logprob_i = (c.cache_lambda * (cache_prob_i+1e-8) + (1 - c.cache_lambda) * logprob_i.exp()).log()
+                logprob_i = torch.stack([(c.cache_lambda * cache_prob_i).log(), np.log(1 - c.cache_lambda) + logprob_i]).logsumexp(dim=0)
             if keep_order:
                 nll.index_copy_(0, indices_i, -logprob_i)
             else:

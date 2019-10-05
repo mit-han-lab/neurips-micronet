@@ -27,7 +27,7 @@ from model import get_net, Transformer
 from modules import hebbian_weight_update
 from optim import scheduler, get_opt 
 from ut import count_params, to_torch, from_torch
-from data import SampleIterator, SequentialIterator
+from data import SampleIterator, SequentialIterator, DistillationSampleIterator
 
 def train(c):
     c.setdefault(hebbian=False)
@@ -36,6 +36,9 @@ def train(c):
     emb_params = count_params(net.embed) + count_params(net.loss.projections) + count_params(net.loss.clusters)
     opt = get_opt(c, net)
     net, opt, step = c.init_model(net, opt=opt, step='max', train=True)
+    if c.get('distillation_teacher') == 'file':
+        data_tr_distill = DistillationSampleIterator(c, c.train_batch, split='train')
+        iter_tr_distill = iter(data_tr_distill)
 
     step_lr = scheduler(c, opt, step)
     data_tr = SampleIterator(c, c.train_batch, split='valid' if c.debug else 'train')
@@ -58,19 +61,43 @@ def train(c):
         while step < s.step_max:
             step_lr(step)
 
-            x = to_torch(next(iter_tr), c.device).t()
+            if c.get('distillation_teacher') == 'file':
+                x_hard_labels, x_soft_labels, x_soft_probs = next(iter_tr_distill)
 
-            t_s = time()
-            inputs, labels = x[:-1], x[1:]
-            preds = net(inputs, labels)
-            loss = preds['loss']
-            if c.model_class == 'UniversalTransformer':
-                act_loss = preds['act_loss']
-                total_loss = act_loss + loss
-                extras = dict(act_loss=from_torch(act_loss), n_updates=from_torch(preds['n_updates'].mean()))
-            else:
+                x_hard_labels = to_torch(x_hard_labels, c.device).t()
+
+                x_soft_labels = to_torch(x_soft_labels, c.device)
+                x_soft_labels = x_soft_labels.permute(1, 0, 2)
+
+                x_soft_probs = to_torch(x_soft_probs, c.device)
+                x_soft_probs = x_soft_probs.permute(1, 0, 2)
+
+                inputs, hard_labels = x_hard_labels[:-1], x_hard_labels[1:]
+                soft_labels = x_soft_labels[1:]
+                soft_probs = x_soft_probs[1:]
+
+                t_s = time()
+
+                preds = net(inputs=inputs, labels=hard_labels, soft_labels=soft_labels, soft_probs=soft_probs,
+                            is_distilling=True, current_step=step)
+                loss = preds['loss']
                 total_loss = loss
                 extras = {}
+
+            else:
+                x = to_torch(next(iter_tr), c.device).t()
+
+                t_s = time()
+                inputs, labels = x[:-1], x[1:]
+                preds = net(inputs, labels)
+                loss = preds['loss']
+                if c.model_class == 'UniversalTransformer':
+                    act_loss = preds['act_loss']
+                    total_loss = act_loss + loss
+                    extras = dict(act_loss=from_torch(act_loss), n_updates=from_torch(preds['n_updates'].mean()))
+                else:
+                    total_loss = loss
+                    extras = {}
 
             opt.zero_grad()
             if torch.isnan(total_loss):
@@ -149,20 +176,24 @@ def evaluate(c, data, net):
 
 def evaluate_cache_search(config):
     net, step = config.var(device="cuda:0").load_model("max")
+    print(step)
 
     # search best cache hyperparamters on validation
     data_val = SequentialIterator(config,config.eval_batch, split="valid")
-    thetas = [1e-2, 9e-3, 8e-3, 7e-3, 6e-3, 5e-3, 4e-3, 3e-3, 2e-3, 1e-3]
-    lambdas = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
+    thetas = [1.2e-2, 1.1e-2, 1e-2, 9e-3, 8e-3, 7e-3, 6e-3, 5e-3, 4e-3, 3e-3, 2e-3, 1e-3]
+    lambdas = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
     best_theta = -1
     best_lambda = -1
     best_ppl = 1000000
+    perplexity = {}
     for theta in thetas:
         for lam in lambdas:
             if (theta, lam) in perplexity:
                 continue
             net.loss.cache_keys = net.loss.cache_values = None
-            perplexity[theta, lam] = evaluate(c.var(use_cache=True, n_cache=500, cache_theta=theta, cache_lambda=lam), data_val, net)['perplexity']
+            perplexity[theta, lam] = evaluate(config.var(use_cache=True, n_cache=500, cache_theta=theta, cache_lambda=lam), data_val, net)['perplexity']
+            print(perplexity[theta, lam])
+
             if perplexity[theta, lam] < best_ppl:
                 best_theta = theta
                 best_lambda = lam
@@ -170,7 +201,7 @@ def evaluate_cache_search(config):
 
     # evaluate on test
     data_test = SequentialIterator(config, config.eval_batch, split="test")
-    eval_output = evaluate(config.var(use_cache=True, n_cache=500, cache_thetaa=best_theta, cache_lambda=best_lambda), data_test, net)
+    eval_output = evaluate(config.var(use_cache=True, n_cache=500, cache_theta=best_theta, cache_lambda=best_lambda), data_test, net)
     config.log("TEST RESULT: %s" % eval_output)
     return eval_output
 

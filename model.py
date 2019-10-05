@@ -128,7 +128,7 @@ class Transformer(nn.Module):
         for layer_embed, layer_loss in zip(self.embed.layers, self.loss.layers):
             layer_loss.weight = layer_embed.weight
 
-    def forward(self, inputs, labels, prevs=None):
+    def forward(self, inputs, labels, prevs=None, soft_labels=None, soft_probs=None, is_distilling=False, current_step=0.):
         # inputs: (n_group * n_seq, n_batch)
         # labels: (n_group * n_seq, n_batch)
         c = self.c
@@ -150,8 +150,20 @@ class Transformer(nn.Module):
             nexts.append(prev)
         
         x = self.dropout(x)
+        if c.get('distillation_teacher') == 'file' and is_distilling:
+            soft_labels_reshape = soft_labels.reshape(-1, soft_labels.size(2))
+            soft_probs_reshape = soft_probs.reshape(-1, soft_probs.size(2))
+            loss, hiddens = self.loss(hidden=x.reshape(-1, x.size(2)), target=labels.reshape(-1),
+                                      soft_labels=soft_labels_reshape, soft_probs=soft_probs_reshape,
+                                      is_distilling=is_distilling, current_step=current_step)
+            loss = loss.reshape(labels.shape)[:n_gs]
+            return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
 
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
+        if c.get('gen_soft'):
+            # loss = loss.reshape(labels.shape)[:n_gs]
+            return loss, hiddens
+
         loss = loss.reshape(labels.shape)[:n_gs]
         return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
 
