@@ -51,9 +51,13 @@ class DistillationSampleIterator:
         assert split == 'train'
         self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()
         print(Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy')
-        self.soft_labels = (Cache / 'wikitext-103' / split + '_soft_labels.npy').load()
+        if c.get('top30') == 1:
+            self.soft_labels = (Cache / 'wikitext-103' / split + '_soft_labels_top30.npy').load()
+            self.soft_probs = (Cache / 'wikitext-103' / split + '_soft_probs_top30.npy').load()
+        else:
+            self.soft_labels = (Cache / 'wikitext-103' / split + '_soft_labels.npy').load()
+            self.soft_probs = (Cache / 'wikitext-103' / split + '_soft_probs.npy').load()
         print(self.soft_labels.shape)
-        self.soft_probs = (Cache / 'wikitext-103' / split + '_soft_probs.npy').load()
         print(self.soft_probs.shape)
         self.bs = batch_size
         np.random.seed(c.local_rank)
