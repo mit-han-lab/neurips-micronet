@@ -124,8 +124,8 @@ def train(c):
                 **extras
             )).add_prefix('train_')
             step_result['lr'] = next(iter(opt.param_groups))['lr']
-            step_result['theta'] = preds['theta']
-            step_result['lambda'] = preds['lambda']
+            step_result['theta'] = from_torch(preds['theta'])
+            step_result['lambda'] = from_torch(preds['lambda'])
 
             s.step = step = step + 1
             if step % c.step_eval == 0:

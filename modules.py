@@ -110,7 +110,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         else:
             theta = c.cache_theta
         self.last_theta = from_torch(theta)
-        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-np.inf) # (n_s, n_c + n_s)
+        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-(1e8 if c.opt_level == 'O0' else np.inf))# (n_s, n_c + n_s)
         # (n_s, n_cache)
         logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
         indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
