@@ -1,4 +1,7 @@
-from apex import amp
+try:
+    from apex import amp
+except ImportError:
+    pass
 
 from u import *
 
@@ -449,7 +452,12 @@ class Config(Namespace):
             net_dict = net.module.state_dict()
         except AttributeError:
             net_dict = net.state_dict()
-        return to_torch(dict(step=step, net=net_dict, opt=opt.state_dict(), amp=amp.state_dict()), device='cpu')
+        state = dict(step=step, net=net_dict, opt=opt.state_dict())
+        try:
+            state['amp'] = amp.state_dict()
+        except:
+            pass
+        return to_torch(state, device='cpu')
 
     def load_state(self, step='max', path=None):
         '''

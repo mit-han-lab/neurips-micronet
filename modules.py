@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from u import from_torch
 
 class AdaptiveEmbedding(nn.Module):
     def __init__(self, c):
@@ -78,6 +79,15 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         )
         self.cache_keys = self.cache_values = None
 
+        if c.use_cache:
+            if c.get('cache_theta_init'):
+                theta = torch.tensor(c.cache_theta_init)
+                self.cache_theta_inv_softplus = nn.Parameter((theta.exp() - 1).log())
+            
+            if c.get('cache_lambda_init'):
+                lam = torch.tensor(c.cache_lambda_init)
+                self.cache_lambda_inv_sigmoid = nn.Parameter((lam / (1 - lam)).log())
+
     def query_cache(self, hidden, target):
         # assume n_batch = 1
         c = self.c
@@ -90,23 +100,30 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             cache_values = target
         else:
             n_cache = cache_keys.size(0)
-            cache_keys = torch.cat((cache_keys, hidden))
+            cache_keys = torch.cat((cache_keys.detach(), hidden))
             cache_values = torch.cat((cache_values, target))
         cache_keys = cache_keys[-(c.n_cache + n_seq):]
         cache_values = cache_values[-(c.n_cache + n_seq):]
         
-        attn = c.cache_theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-np.inf) # (n_s, n_c + n_s)
+        if c.get('cache_theta_init'):
+            theta = F.softplus(self.cache_theta_inv_softplus)
+        else:
+            theta = c.cache_theta
+        self.last_theta = from_torch(theta)
+        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-np.inf) # (n_s, n_c + n_s)
         # (n_s, n_cache)
-        probs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).softmax(dim=1)
-        indices = F.pad(cache_values, (c.n_cache - n_cache, 0)).unfold(0, c.n_cache, 1)[:n_seq]
+        logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
+        indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
 
         mask = indices != target[:, None]
-        probs.masked_fill_(mask, 0)
+        logprobs = logprobs - mask.to(logprobs.dtype) * 10e8
+        logprobs[torch.isnan(logprobs)] = -np.inf
+        # logprobs.masked_fill_(mask, -np.inf)
 
-        pos_prob = probs.sum(dim=1)
+        pos_logprob = logprobs.logsumexp(dim=1)
         self.cache_keys = cache_keys[-c.n_cache:]
         self.cache_values = cache_values[-c.n_cache:]
-        return pos_prob
+        return pos_logprob
         
     def forward(self, hidden, target, keep_order=False, soft_labels=None, soft_probs=None, is_distilling=False, current_step=0.):
         # hidden: (n_seq * n_batch, n_embed)
@@ -115,7 +132,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         assert hidden.size(0) == target.size(0), 'Input and target should have the same size in the batch dimension'
         
         if c.use_cache:
-            cache_prob = self.query_cache(hidden, target)
+            cache_logprob = self.query_cache(hidden, target)
 
         head_logit = torch.cat((self.layers[0](hidden), self.clusters(hidden)), dim=1)
 
@@ -142,13 +159,13 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             for i, (start, end) in enumerate(zip([0] + c.cutoffs, c.cutoffs + [c.n_vocab])):
                 mask_i = (target >= start) & (target < end)
 
-                if c.use_cache:
-                    cache_prob_i = cache_prob[mask_i]
-
                 indices_i = mask_i.nonzero().squeeze()
 
                 if indices_i.numel() == 0:
                     continue
+
+                if c.use_cache:
+                    cache_logprob_i = cache_logprob.index_select(0, indices_i)
 
                 target_i = (target.index_select(0, indices_i) - start)[:, None]
                 head_logprob_i = head_logprob.index_select(0, indices_i)
@@ -203,12 +220,17 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                         masked_soft_probs_i.view(masked_soft_probs_i.size(0), masked_soft_probs_i.size(1), 1))
                     distill_loss_i = distill_loss_i.squeeze()
                 if c.use_cache:
-                    logprob_i = (c.cache_lambda * cache_prob_i + (1 - c.cache_lambda) * logprob_i.exp()).log()
+                    if c.get('cache_lambda_init'):
+                        cache_lambda = self.cache_lambda_inv_sigmoid.sigmoid()
+                    else:
+                        cache_lambda = torch.tensor(c.cache_lambda, device=cache_logprob_i.device, dtype=cache_logprob_i.dtype)
+                    self.last_lambda = from_torch(cache_lambda)
+                    logprob_i = torch.stack([cache_lambda.log() + cache_logprob_i, (1 - cache_lambda).log() + logprob_i]).logsumexp(dim=0)
 
                 if keep_order:
                     nll.index_copy_(0, indices_i, -logprob_i)
                     distill_loss.index_copy_(0, indices_i, -distill_loss_i)
-
+ 
                 else:
                     nll[offset: offset + logprob_i.size(0)].copy_(-logprob_i)
                     distill_loss[offset: offset + distill_loss_i.size(0)].copy_(-distill_loss_i)
@@ -230,12 +252,14 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         offset = 0
         for i, (start, end) in enumerate(zip([0] + c.cutoffs, c.cutoffs + [c.n_vocab])):
             mask_i = (target >= start) & (target < end)
-            if c.use_cache:
-                cache_prob_i = cache_prob[mask_i]
+            
             indices_i = mask_i.nonzero().squeeze()
 
             if indices_i.numel() == 0:
                 continue
+            
+            if c.use_cache:
+                cache_logprob_i = cache_logprob.index_select(0, indices_i)
             
             target_i = (target.index_select(0, indices_i) - start)[:, None]
             head_logprob_i = head_logprob.index_select(0, indices_i)
@@ -253,8 +277,12 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 hiddens[i] = (proj_i.detach(), target_i)
             
             if c.use_cache:
-                # logprob_i = (c.cache_lambda * (cache_prob_i+1e-8) + (1 - c.cache_lambda) * logprob_i.exp()).log()
-                logprob_i = torch.stack([(c.cache_lambda * cache_prob_i).log(), np.log(1 - c.cache_lambda) + logprob_i]).logsumexp(dim=0)
+                if c.get('cache_lambda_init'):
+                    cache_lambda = self.cache_lambda_inv_sigmoid.sigmoid()
+                else:
+                    cache_lambda = torch.tensor(c.cache_lambda, device=cache_logprob_i.device, dtype=cache_logprob_i.dtype)
+                self.last_lambda = cache_lambda
+                logprob_i = torch.stack([cache_lambda.log() + cache_logprob_i, (1 - cache_lambda).log() + logprob_i]).logsumexp(dim=0)
             if keep_order:
                 nll.index_copy_(0, indices_i, -logprob_i)
             else:

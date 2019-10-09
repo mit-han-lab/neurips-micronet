@@ -1,6 +1,9 @@
 import os
 import sys
-from apex import amp
+try:
+    from apex import amp
+except ImportError:
+    pass
 import torch
 import torch.nn as nn    
 import torch.nn.functional as F
@@ -128,7 +131,7 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, c):
         super(Transformer, self).__init__()
-        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False, mask_pad=False, fix_softmax=False, tie_layers=False, tensor_train=False)
+        self.c = c.setdefault(layers=[{} for _ in range(c.n_layers)], light_conv=False, mask_pad=False, fix_softmax=False, tie_layers=False, tensor_train=False, quantizing=False)
         self.embed = AdaptiveEmbedding(c)
 
         self.dropout = nn.Dropout(c.dropout)
@@ -186,7 +189,13 @@ class Transformer(nn.Module):
             # loss = loss.reshape(labels.shape)[:n_gs]
             return loss, hiddens
 
-        loss = loss.reshape(labels.shape)[:n_gs]
-        return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
+        loss = loss.reshape(labels.shape)[:n_gs].mean()
+        extras = {}
+        if c.use_cache:
+            extras['lambda'] = self.loss.last_lambda
+            extras['theta'] = self.loss.last_theta
+        if c.quantizing:
+            return loss, nexts
+        return dict(loss=loss, state=nexts, hiddens=hiddens, **extras)
 
 

@@ -20,7 +20,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-from apex import amp
+try:
+    from apex import amp
+except ImportError:
+    pass
 
 from u import *
 from model import get_net, Transformer
@@ -121,6 +124,8 @@ def train(c):
                 **extras
             )).add_prefix('train_')
             step_result['lr'] = next(iter(opt.param_groups))['lr']
+            step_result['theta'] = preds['theta']
+            step_result['lambda'] = preds['lambda']
 
             s.step = step = step + 1
             if step % c.step_eval == 0:
