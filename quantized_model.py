@@ -40,7 +40,7 @@ class AdaptiveEmbedding(nn.Module):
             emb_i = layer(inp_i)
             if i > 0:
                 emb_i = self.projections[i - 1](emb_i)
-            emb_flat.index_copy_(0, indices_i, emb_i)
+            emb_flat.index_copy_(0, indices_i, emb_i) # TODO
 
         emb = emb_flat.view(*x.size(), c.n_embed)
         emb.mul_(np.sqrt(c.n_embed))
@@ -49,8 +49,7 @@ class AdaptiveEmbedding(nn.Module):
 class ProjectedAdaptiveLogSoftmax(nn.Module):
     def __init__(self, c):
         super(ProjectedAdaptiveLogSoftmax, self).__init__()
-
-        self.c = c.setdefault(use_cache=False)
+        self.c = c
         n_layers = len(c.cutoffs) + 1
 
         n_embeds = c.n_embeds
@@ -69,12 +68,17 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         )
         self.cache_keys = self.cache_values = None
 
-        if c.use_cache:
-            theta = torch.tensor(c.cache_theta_init)
-            self.cache_theta_inv_softplus = nn.Parameter((theta.exp() - 1).log())
-            
-            lam = torch.tensor(c.cache_lambda_init)
-            self.cache_lambda_inv_sigmoid = nn.Parameter((lam / (1 - lam)).log())
+        theta = torch.tensor(c.cache_theta_init)
+        self.cache_theta_inv_softplus = nn.Parameter((theta.exp() - 1).log())
+        
+        lam = torch.tensor(c.cache_lambda_init)
+        self.cache_lambda_inv_sigmoid = nn.Parameter((lam / (1 - lam)).log())
+
+        self.cat_keys = D.Concat()
+        self.cat_vals = D.Concat()
+        self.mul_h_keys = D.Matmul()
+
+        self.cat_h_clusters = D.Concat(dim=1)
 
     def query_cache(self, hidden, target):
         # assume n_batch = 1
@@ -88,14 +92,13 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             cache_values = target
         else:
             n_cache = cache_keys.size(0)
-            cache_keys = torch.cat((cache_keys.detach(), hidden))
+            cache_keys = self.cat_keys(cache_keys.detach(), hidden)
             cache_values = torch.cat((cache_values, target))
         cache_keys = cache_keys[-(c.n_cache + n_seq):]
         cache_values = cache_values[-(c.n_cache + n_seq):]
         
-        theta = F.softplus(self.cache_theta_inv_softplus)
-        self.last_theta = from_torch(theta)
-        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-(1e8 if c.opt_level == 'O0' else np.inf)) # (n_s, n_c + n_s)
+        self.last_theta = theta = F.softplus(self.cache_theta_inv_softplus)
+        attn = theta * F.pad(self.mul_h_keys(hidden, cache_keys.t()), (c.n_cache - n_cache, 0), value=-1e8) # (n_s, n_c + n_s) TODO
         # (n_s, n_cache)
         logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
         indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
@@ -115,16 +118,14 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         c = self.c
         assert hidden.size(0) == target.size(0), 'Input and target should have the same size in the batch dimension'
         
-        if c.use_cache:
-            cache_logprob = self.query_cache(hidden, target)
+        cache_logprob = self.query_cache(hidden, target)
 
-        head_logit = torch.cat((self.layers[0](hidden), self.clusters(hidden)), dim=1)
+        head_logit = self.cat_h_clusters(self.layers[0](hidden), self.clusters(hidden))
 
         head_logprob = head_logit.log_softmax(dim=1)
 
         nll = torch.zeros_like(target, dtype=hidden.dtype, device=hidden.device)
 
-        hiddens = {}
         offset = 0
         for i, (start, end) in enumerate(zip([0] + c.cutoffs, c.cutoffs + [c.n_vocab])):
             mask_i = (target >= start) & (target < end)
@@ -134,14 +135,12 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             if indices_i.numel() == 0:
                 continue
             
-            if c.use_cache:
-                cache_logprob_i = cache_logprob.index_select(0, indices_i)
+            cache_logprob_i = cache_logprob.index_select(0, indices_i)
             
             target_i = (target.index_select(0, indices_i) - start)[:, None]
             head_logprob_i = head_logprob.index_select(0, indices_i)
 
             if i == 0:
-                hiddens[i] = (hidden.detach().index_select(0, indices_i), target_i)
                 logprob_i = head_logprob_i.gather(1, target_i).squeeze(1)
             else:
                 hidden_i = hidden.index_select(0, indices_i)
@@ -150,15 +149,14 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 tail_logprob_i = tail_logit_i.log_softmax(dim=1)
                 
                 logprob_i = head_logprob_i[:, -i] + tail_logprob_i.gather(1, target_i).squeeze(1)
-                hiddens[i] = (proj_i.detach(), target_i)
             
-            if c.use_cache:
-                self.last_lambda = cache_lambda = self.cache_lambda_inv_sigmoid.sigmoid()
-                logprob_i = torch.stack([cache_lambda.log() + cache_logprob_i, (1 - cache_lambda).log() + logprob_i]).logsumexp(dim=0)
+            self.last_lambda = cache_lambda = self.cache_lambda_inv_sigmoid.sigmoid()
+            logprob_i = torch.stack([cache_lambda.log() + cache_logprob_i, (1 - cache_lambda).log() + logprob_i]).logsumexp(dim=0)
+            
             nll[offset: offset + logprob_i.size(0)].copy_(-logprob_i)
             offset += logprob_i.size(0)
 
-        return nll, hiddens
+        return nll
 
 class Decoder(nn.Module):
     def __init__(self, c, layer_i):
@@ -184,7 +182,15 @@ class Decoder(nn.Module):
             nn.Dropout(c.dropout),
         )
         self.c = c
-        # self.split = D.split()
+        self.split_q_kv = D.Split([c.n_k, c.n_k + c.n_v], dim=-1)
+        self.cat_pad_kv = D.Concat(dim=0)
+        self.split_k_v = D.Split([c.n_k, c.n_v], dim=2)
+        self.mul_q_k = D.BatchMatmul()
+        self.mul_q_e = D.Matmul()
+        self.add_qk_qe = D.EltwiseAdd()
+        self.mul_attn_v = D.BatchMatmul()
+        self.add_in_attn = D.EltwiseAdd()
+        self.add_in_attn_fc = D.EltwiseAdd()
     
     def forward(self, x, prev=None):
         # x: (n_group * n_seq, n_batch, n_embed)
@@ -196,25 +202,27 @@ class Decoder(nn.Module):
         n_g = x.size(0) // n_s
         n_b = x.size(1)
         n_h = c.n_head
+        n_bh = n_b * n_h
         n_k = c.n_k
         n_v = c.n_v
         
         qkv = self.qkv(self.ln1(x)).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
-        q, kv = qkv.split([n_k, n_k + n_v], dim=-1)
+        q, kv = self.split_q_kv(qkv)
         
         q = q.reshape(n_g, n_s, n_b * n_h, n_k)
 
         padding = prev or torch.zeros((n_s, n_b * n_h, n_k + n_v), dtype=kv.dtype, device=kv.device)
-        kv = torch.cat((padding, kv))
-        k, v = kv.unfold(0, 2 * n_s, n_s).split([n_k, n_v], dim=2) # (n_g, n_bh, n_kv, 2 * n_s)
+        kv = self.cat_pad_kv(padding, kv)
+        k, v = self.split_k_v(kv.unfold(0, 2 * n_s, n_s)) # (n_g, n_bh, n_kv, 2 * n_s)
 
-        qk = torch.einsum('gsbk,gbkt->gbst', q, k) # (n_g, n_bh, n_s, 2 * n_s)
-        qk = qk.reshape(n_g, n_b * n_h, -1).unfold(2, n_s + 1, 2 * n_s + 1) # (n_g, n_bh, n_s, n_s + 1)
+        qk = self.mul_q_k(
+            q.transpose(1, 2).reshape(n_g * n_bh, n_s, n_k),
+            k.reshape(n_g * n_bh, n_k, 2 * n_s)
+        ).reshape(n_g, n_bh, n_s * 2 * n_s).unfold(2, n_s + 1, 2 * n_s + 1) # (n_g, n_bh, n_s, n_s + 1)
 
-        pos_emb = self.pos_emb
-        qe = torch.einsum('gsbk,kt->gbst', q, pos_emb.to(q.dtype))
+        qe = self.mul_q_e(q, self.pos_emb).transpose(1, 2)
 
-        attn = qk + qe
+        attn = self.add_qk_qe(qk, qe)
         attn.mul_(n_k ** -0.5)
         
         attn = attn.softmax(dim=-1)
@@ -222,15 +230,15 @@ class Decoder(nn.Module):
         attn = F.pad(attn, (0, n_s))
         attn = attn.reshape(n_g, n_b * n_h, -1).unfold(2, 2 * n_s, 2 * n_s) # (n_g, n_bh, n_s, 2 * n_s)
 
-        attnv = torch.einsum('gbst,gbvt->gsbv', attn, v) # (n_g, n_s, n_bh, n_v)
+        attnv = self.mul_attn_v(attn.reshape(n_g * n_bh, n_s, 2 * n_s), v.transpose(2, 3).reshape(n_g * n_bh, 2 * n_s, n_v)).reshape(n_g, n_bh, n_s, n_v).transpose(1, 2)
         attn_out = self.out(attnv.reshape(n_g * n_s, n_b, n_h * n_v)) # (n_g * n_s, n_b, n_embed)
         attn_out = self.dropout(attn_out)
 
-        out = x + attn_out
+        in_attn = self.add_in_attn(x, attn_out)
         
         next = kv[-n_s:].detach()
 
-        out = out + self.fc(self.ln2(out))
+        out = self.add_in_attn_fc(in_attn, self.fc(self.ln2(in_attn)))
 
         return out, next
 
@@ -273,15 +281,13 @@ class Transformer(nn.Module):
         
         x = self.dropout(x)
 
-        loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
+        loss = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
 
-        loss = loss.reshape(labels.shape)[:n_gs].mean()
-        extras = {}
-        if c.use_cache:
-            extras['lambda'] = self.loss.last_lambda
-            extras['theta'] = self.loss.last_theta
-            
-        return dict(loss=loss, state=nexts, hiddens=hiddens, **extras)
+        loss = loss.reshape(labels.shape)[:n_gs].mean() # this mean is okay because it averages over the sequence (rather than average within a single token)
+        return dict(loss=loss, state=nexts, **{
+            'lambda': self.loss.last_lambda,
+            'theta': self.loss.last_theta
+        })
 
 get_net = Transformer
 get_opt = lambda c, net: optim.Adam(net.parameters(), lr=c.lr)
