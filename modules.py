@@ -110,7 +110,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         else:
             theta = c.cache_theta
         self.last_theta = from_torch(theta)
-        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-np.inf) # (n_s, n_c + n_s)
+        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-(1e8 if c.opt_level == 'O0' else np.inf))# (n_s, n_c + n_s)
         # (n_s, n_cache)
         logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
         indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
@@ -146,7 +146,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 tail_prob_i = tail_prob_i * head_prob[:, -(i + 1)].unsqueeze(1)
                 all_prob = torch.cat((all_prob, tail_prob_i), dim=1)
             return all_prob, None
-
+        # print("target size", target.size())
 
         if c.get('distillation_teacher') == 'file' and is_distilling:
             head_logprob = head_logit.log_softmax(dim=1)
@@ -176,19 +176,57 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 soft_probs_i = soft_probs_i.reshape(-1)
 
                 mask_soft_labels_i = (soft_labels_i >= start) & (soft_labels_i < end)
+                mask_soft_labels_i_first_bin = (soft_labels_i < c.cutoffs[0])
+                # print("mask_soft_labels_i_first_bin size", i, mask_soft_labels_i_first_bin.size())
+
 
                 # those in the bin need to be substracted
                 masked_soft_labels_i = mask_soft_labels_i.type(soft_labels_i.type()) * (soft_labels_i - start)
                 masked_soft_probs_i = mask_soft_labels_i.type(soft_probs_i.type()) * soft_probs_i
 
+                if c.get('distill_first_bin') == 1:
+                    masked_soft_labels_i_first_bin = mask_soft_labels_i_first_bin.type(soft_labels_i.type()) * soft_labels_i
+                    masked_soft_probs_i_first_bin = mask_soft_labels_i_first_bin.type(soft_probs_i.type()) * soft_probs_i
+                    # print("masked_soft_labels_i_first_bin size", i ,masked_soft_labels_i_first_bin.size())
+                    # print("masked_soft_probs_i_first_bin size", i ,masked_soft_probs_i_first_bin.size())
+
+
                 masked_soft_labels_i = masked_soft_labels_i.reshape(-1, topk)
                 masked_soft_probs_i = masked_soft_probs_i.reshape(-1, topk)
+                # print("masked_soft_labels_i size", i, masked_soft_labels_i.size())
+                # print("masked_soft_probs_i size", i, masked_soft_probs_i.size())
+                # print("masked_soft_labels_i[0]", i, masked_soft_labels_i[0])
+                # print("masked_soft_probs_i[0]", i, masked_soft_probs_i[0])
+
+
+                if c.get('distill_first_bin') == 1:
+                    masked_soft_labels_i_first_bin = masked_soft_labels_i_first_bin.reshape(-1, topk)
+                    masked_soft_probs_i_first_bin = masked_soft_probs_i_first_bin.reshape(-1, topk)
+                    # print("masked_soft_labels_i_first_bin size", i ,masked_soft_labels_i_first_bin.size())
+                    # print("masked_soft_probs_i_first_bin size", i ,masked_soft_probs_i_first_bin.size())
+                    # print("masked_soft_labels_i_first_bin[0]", i ,masked_soft_labels_i_first_bin[0])
+                    # print("masked_soft_probs_i_first_bin[0]", i ,masked_soft_probs_i_first_bin[0])
 
                 masked_soft_probs_i = masked_soft_probs_i + 1e-8
 
+                if c.get('distill_first_bin') == 1:
+                    masked_soft_probs_i_first_bin = masked_soft_probs_i_first_bin + 1e-8
+
                 # normalize soft_probs_i to sum=1 as the flag indicated
-                if c.get('no_normalize') != 1:
-                    masked_soft_probs_i = masked_soft_probs_i / masked_soft_probs_i.sum(axis=1).unsqueeze(1)
+                # if c.get('no_normalize') != 1:
+                #     masked_soft_probs_i = masked_soft_probs_i / masked_soft_probs_i.sum(axis=1).unsqueeze(1)
+
+                if c.get('distill_first_bin') == 1:
+                    # masked_soft_labels_i_all = torch.cat((masked_soft_labels_i_first_bin, masked_soft_labels_i), 1)
+                    masked_soft_probs_i_all = torch.cat((masked_soft_probs_i_first_bin, masked_soft_probs_i), 1)
+                    # print("masked_soft_probs_i_all size", i ,masked_soft_probs_i_all.size())
+                    # print("masked_soft_probs_i_all[0]", i ,masked_soft_probs_i_all[0])
+
+                    if c.get('no_normalize') != 1:
+                        masked_soft_probs_i_all = masked_soft_probs_i_all / masked_soft_probs_i_all.sum(axis=1).unsqueeze(1)
+                else:
+                    if c.get('no_normalize') != 1:
+                        masked_soft_probs_i = masked_soft_probs_i / masked_soft_probs_i.sum(axis=1).unsqueeze(1)
 
                 if i == 0:
                     hiddens[i] = (hidden.detach().index_select(0, indices_i), target_i)
@@ -202,6 +240,11 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                     distill_loss_i = distill_loss_i.squeeze()
 
                 else:
+                    if c.get('distill_first_bin') == 1:
+                        logprob_distill_i_first_bin = torch.gather(head_logprob_i, 1, masked_soft_labels_i_first_bin)
+                        # print("logprob_distill_i_first_bin size", i ,logprob_distill_i_first_bin.size())
+                        # print("logprob_distill_i_first_bin[0]", i ,logprob_distill_i_first_bin[0])
+
                     hidden_i = hidden.index_select(0, indices_i)
                     proj_i = self.projections[i - 1](hidden_i)
                     tail_logit_i = self.layers[i](proj_i)
@@ -212,6 +255,13 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                     logprob_distill_i = head_logprob_i[:, -i].unsqueeze(1) + torch.gather(tail_logprob_i, 1,
                                                                                           masked_soft_labels_i)
 
+                    if c.get('distill_first_bin') == 1:
+                        logprob_distill_i = torch.cat((logprob_distill_i_first_bin, logprob_distill_i), 1)
+                        # print("logprob_distill_i size", i, logprob_distill_i.size())
+                        # print("logprob_distill_i[0]", i, logprob_distill_i[0])
+                        masked_soft_probs_i = masked_soft_probs_i_all
+                        # print("masked_soft_probs_i size", i, masked_soft_probs_i.size())
+                        # print("masked_soft_probs_i[0]", i, masked_soft_probs_i[0])
                     hiddens[i] = (proj_i.detach(), target_i)
                     # logprob_distill_i = torch.gather(logprob_distill_i_all, 1, masked_soft_labels_i)
 
