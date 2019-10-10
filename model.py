@@ -173,7 +173,7 @@ class Transformer(nn.Module):
         for layer, prev in zip(self.layers, prevs):
             x, prev = layer(x, prev=prev)
             nexts.append(prev)
-        
+
         x = self.dropout(x)
         if c.get('distillation_teacher') == 'file' and is_distilling:
             soft_labels_reshape = soft_labels.reshape(-1, soft_labels.size(2))
@@ -182,7 +182,11 @@ class Transformer(nn.Module):
                                       soft_labels=soft_labels_reshape, soft_probs=soft_probs_reshape,
                                       is_distilling=is_distilling, current_step=current_step)
             loss = loss.reshape(labels.shape)[:n_gs]
-            return dict(loss=loss.mean(), state=nexts, hiddens=hiddens)
+            extras = {}
+            if c.use_cache:
+                extras['lambda'] = self.loss.last_lambda
+                extras['theta'] = self.loss.last_theta
+            return dict(loss=loss.mean(), state=nexts, hiddens=hiddens, **extras)
 
         loss, hiddens = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
         if c.get('gen_soft'):

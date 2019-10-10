@@ -330,9 +330,9 @@ class Config(Namespace):
             self.main = self.local_rank == 0
             
         net.to(self.device)
-        if train:
+        if train and self.opt_level != 'O0':
             # configure mixed precision
-            net, opt = amp.initialize(net, opt, opt_level=self.opt_level, loss_scale=self.get('loss_scale'), verbosity=int(self.opt_level != 'O0'))
+            net, opt = amp.initialize(net, opt, opt_level=self.opt_level, loss_scale=self.get('loss_scale'))
         step = self.set_state(net, opt=opt, step=step)
 
         if self.distributed:
@@ -440,7 +440,7 @@ class Config(Namespace):
         if self.get('append_module_before_load'):
             state['net'] = OrderedDict(('module.' + k, v) for k, v in state['net'].items())
         net.load_state_dict(state['net'])
-        if opt:
+        if opt and 'opt' in state:
             opt.load_state_dict(state['opt'])
         if 'amp' in state and self.opt_level != 'O0':
             amp.load_state_dict(state['amp'])
