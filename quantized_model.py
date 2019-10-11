@@ -40,7 +40,7 @@ class AdaptiveEmbedding(nn.Module):
             emb_i = layer(inp_i)
             if i > 0:
                 emb_i = self.projections[i - 1](emb_i)
-            emb_flat.index_copy_(0, indices_i, emb_i) # TODO
+            emb_flat.index_copy_(0, indices_i, emb_i)
 
         emb = emb_flat.view(*x.size(), c.n_embed)
         emb.mul_(np.sqrt(c.n_embed))
@@ -74,11 +74,11 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         lam = torch.tensor(c.cache_lambda_init)
         self.cache_lambda_inv_sigmoid = nn.Parameter((lam / (1 - lam)).log())
 
-        self.cat_keys = D.Concat()
-        self.cat_vals = D.Concat()
-        self.mul_h_keys = D.Matmul()
+        self.cat_keys = lambda *x: torch.cat(x) #D.Concat()
+        self.cat_vals = lambda *x: torch.cat(x) #D.Concat()
+        self.mul_h_keys = torch.matmul # D.Matmul()
 
-        self.cat_h_clusters = D.Concat(dim=1)
+        self.cat_h_clusters = lambda *x: torch.cat(x, dim=1)#D.Concat(dim=1)
 
     def query_cache(self, hidden, target):
         # assume n_batch = 1
@@ -98,7 +98,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         cache_values = cache_values[-(c.n_cache + n_seq):]
         
         self.last_theta = theta = F.softplus(self.cache_theta_inv_softplus)
-        attn = theta * F.pad(self.mul_h_keys(hidden, cache_keys.t()), (c.n_cache - n_cache, 0), value=-1e8) # (n_s, n_c + n_s) TODO
+        attn = theta * F.pad(self.mul_h_keys(hidden, cache_keys.t()), (c.n_cache - n_cache, 0), value=-1e8 if hidden.dtype == torch.float32 else -np.inf) # (n_s, n_c + n_s)
         # (n_s, n_cache)
         logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
         indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
@@ -167,30 +167,34 @@ class Decoder(nn.Module):
         self.ln1 = nn.LayerNorm(n_embed)
         
         self.qkv = nn.Linear(n_embed, c.n_head * (2 * c.n_k + c.n_v))
+        self.quant1 = nn.Identity() # for quantization purpose
         self.pos_emb = nn.Parameter(torch.Tensor(c.n_k, c.n_seq + 1))
         nn.init.normal_(self.pos_emb, 0, 0.02)
 
         self.out = nn.Linear(c.n_head * c.n_v, n_embed, bias=False)
+        self.quant2 = nn.Identity()
         self.dropout = nn.Dropout(c.dropout)
 
         self.ln2 = nn.LayerNorm(c.n_embed)
         self.fc = nn.Sequential(
             nn.Linear(c.n_embed, c.n_inner),
-            nn.ReLU(inplace=True),
+            nn.ReLU(), # quantize
             nn.Dropout(c.dropout),
             nn.Linear(c.n_inner, c.n_embed),
+            nn.Identity(), # quantize
             nn.Dropout(c.dropout),
         )
         self.c = c
-        self.split_q_kv = D.Split([c.n_k, c.n_k + c.n_v], dim=-1)
-        self.cat_pad_kv = D.Concat(dim=0)
-        self.split_k_v = D.Split([c.n_k, c.n_v], dim=2)
-        self.mul_q_k = D.BatchMatmul()
-        self.mul_q_e = D.Matmul()
-        self.add_qk_qe = D.EltwiseAdd()
-        self.mul_attn_v = D.BatchMatmul()
-        self.add_in_attn = D.EltwiseAdd()
-        self.add_in_attn_fc = D.EltwiseAdd()
+
+        self.split_q_kv = lambda x: torch.split(x, [c.n_k, c.n_k + c.n_v], dim=-1) #D.Split([c.n_k, c.n_k + c.n_v], dim=-1)
+        self.cat_pad_kv = lambda *x: torch.cat(x) #D.Concat()
+        self.split_k_v = lambda x: torch.split(x, [c.n_k, c.n_v], dim=2)#D.Split([c.n_k, c.n_v], dim=2)
+        self.mul_q_k = torch.bmm #D.BatchMatmul()
+        self.mul_q_e = torch.matmul #D.Matmul()
+        self.add_qk_qe = torch.add #D.EltwiseAdd()
+        self.mul_attn_v = torch.bmm #D.BatchMatmul()
+        self.add_in_attn = torch.add #D.EltwiseAdd()
+        self.add_in_attn_fc = torch.add #D.EltwiseAdd()
     
     def forward(self, x, prev=None):
         # x: (n_group * n_seq, n_batch, n_embed)
@@ -206,12 +210,12 @@ class Decoder(nn.Module):
         n_k = c.n_k
         n_v = c.n_v
         
-        qkv = self.qkv(self.ln1(x)).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
+        qkv = self.quant1(self.qkv(self.ln1(x))).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
         q, kv = self.split_q_kv(qkv)
         
         q = q.reshape(n_g, n_s, n_b * n_h, n_k)
 
-        padding = prev or torch.zeros((n_s, n_b * n_h, n_k + n_v), dtype=kv.dtype, device=kv.device)
+        padding = prev if prev is not None else torch.zeros((n_s, n_b * n_h, n_k + n_v), dtype=kv.dtype, device=kv.device)
         kv = self.cat_pad_kv(padding, kv)
         k, v = self.split_k_v(kv.unfold(0, 2 * n_s, n_s)) # (n_g, n_bh, n_kv, 2 * n_s)
 
@@ -232,6 +236,7 @@ class Decoder(nn.Module):
 
         attnv = self.mul_attn_v(attn.reshape(n_g * n_bh, n_s, 2 * n_s), v.transpose(2, 3).reshape(n_g * n_bh, 2 * n_s, n_v)).reshape(n_g, n_bh, n_s, n_v).transpose(1, 2)
         attn_out = self.out(attnv.reshape(n_g * n_s, n_b, n_h * n_v)) # (n_g * n_s, n_b, n_embed)
+        attn_out = self.quant2(attn_out)
         attn_out = self.dropout(attn_out)
 
         in_attn = self.add_in_attn(x, attn_out)
@@ -248,10 +253,14 @@ class Transformer(nn.Module):
         self.c = c
         self.embed = AdaptiveEmbedding(c)
 
-        self.dropout = nn.Dropout(c.dropout)
+        self.quant1 = nn.Identity()
+        self.dropout1 = nn.Dropout(c.dropout)
 
         self.layers = nn.ModuleList(Decoder(c, i) for i in range(c.n_layers))
-
+        
+        self.quant2 = nn.Identity()
+        self.dropout2 = nn.Dropout(c.dropout)
+        
         self.loss = ProjectedAdaptiveLogSoftmax(c)
 
         # tie output embedding weights to input embedding weights
@@ -271,7 +280,8 @@ class Transformer(nn.Module):
             labels = torch.cat((labels, padding))
 
         x = self.embed(inputs)
-        x = self.dropout(x)
+        x = self.quant1(x)
+        x = self.dropout1(x)
 
         prevs = prevs or [None] * c.n_layers
         nexts = []
@@ -279,15 +289,13 @@ class Transformer(nn.Module):
             x, prev = layer(x, prev=prev)
             nexts.append(prev)
         
-        x = self.dropout(x)
+        x = self.quant2(x)
+        x = self.dropout2(x)
 
         loss = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
 
         loss = loss.reshape(labels.shape)[:n_gs].mean() # this mean is okay because it averages over the sequence (rather than average within a single token)
-        return dict(loss=loss, state=nexts, **{
-            'lambda': self.loss.last_lambda,
-            'theta': self.loss.last_theta
-        })
+        return loss, nexts, self.loss.last_lambda, self.loss.last_theta
 
 get_net = Transformer
 get_opt = lambda c, net: optim.Adam(net.parameters(), lr=c.lr)
@@ -325,11 +333,35 @@ def train(c):
     data_tr = SampleIterator(c, c.train_batch, split='valid' if c.debug else 'train')
     iter_tr = iter(data_tr)
     data_val = SequentialIterator(c, c.eval_batch, split='valid')
+    data_test = SequentialIterator(c, c.eval_batch, split='test')
+
+    print('Before quantization')
+    tbl, sparsity = distiller.weights_sparsity_tbl_summary(net, return_total_sparsity=True)
+    step_result = pd.Series(evaluate(c, data_val, net)).add_prefix('val_')
+    step_result = step_result.append(
+        pd.Series(evaluate(c, data_test, net)).add_prefix('test_')
+    )
+    step_result['sparsity'] = sparsity
+    print(step_result)
 
     compression_scheduler = distiller.config.file_config(net, opt, c.compress)
 
+    print('After initial quantization')
     s = Namespace(net=net, opt=opt, step=step)
     c.on_train_start(s)
+
+    tbl, sparsity = distiller.weights_sparsity_tbl_summary(net, return_total_sparsity=True)
+    step_result = pd.Series(evaluate(c, data_val, net)).add_prefix('val_')
+    step_result = step_result.append(
+        pd.Series(evaluate(c, data_test, net)).add_prefix('test_')
+    )
+    step_result['sparsity'] = sparsity
+    print(step_result)
+
+    npm = []    
+    for name, param in net.named_parameters():
+        if param.dim() in [2, 4] and any(type in name for type in ['weight', 'bias']):
+            npm.append((name, param, param.abs() == 0))
 
     best_val_loss = np.inf
     if s.results is not None and 'val_loss' in s.results.columns:
@@ -350,8 +382,7 @@ def train(c):
 
             t_s = time()
             inputs, labels = x[:-1], x[1:]
-            preds = net(inputs, labels)
-            loss = preds['loss']
+            loss, _, lam, theta = net(inputs, labels)
             
             compression_scheduler.before_backward_pass(epoch, batch, steps_per_epoch, loss, False)
 
@@ -364,6 +395,8 @@ def train(c):
 
             compression_scheduler.before_parameter_optimization(epoch, batch, steps_per_epoch, opt)
             opt.step()
+            for name, param, mask in npm:
+                param.data[mask] = 0
             compression_scheduler.on_minibatch_end(epoch, batch, steps_per_epoch)
             
             if (batch + 1) == steps_per_epoch:
@@ -379,14 +412,17 @@ def train(c):
                 time=time_model,
             )).add_prefix('train_')
             step_result['lr'] = next(iter(opt.param_groups))['lr']
-            step_result['theta'] = preds['theta']
-            step_result['lambda'] = preds['lambda']
+            step_result['theta'] = from_torch(theta)
+            step_result['lambda'] = from_torch(lam)
 
             s.step = step = step + 1
             if step % c.step_eval == 0:
                 tbl, sparsity = distiller.weights_sparsity_tbl_summary(net, return_total_sparsity=True)
                 step_result = step_result.append(
                     pd.Series(evaluate(c, data_val, net)).add_prefix('val_')
+                )
+                step_result = step_result.append(
+                    pd.Series(evaluate(c, data_test, net)).add_prefix('test_')
                 )
                 step_result['sparsity'] = sparsity
                 s.record_step = step_result['val_loss'] < best_val_loss
@@ -418,17 +454,13 @@ def evaluate(c, data, net):
             x = to_torch(batch, c.device).t()
             inputs, labels = x[:-1], x[1:]
 
-            preds = net.forward(inputs, labels, prevs=prevs)
-            losses.append(preds['loss'])
+            loss, prevs, _, _ = net.forward(inputs, labels, prevs=prevs)
+            losses.append(loss)
             weights.append(labels.size(0))
         weights = np.array(weights)
         weights = weights / weights.sum()
         loss = sum(x * w for x, w in zip(losses, weights))
 
-    if c.distributed:
-        gathered_losses = [torch.zeros_like(loss) for _ in range(c.world_size)]
-        torch.distributed.all_gather(gathered_losses, loss)
-        loss = sum(gathered_losses) / len(gathered_losses)
     if was_training:
         net.train()
     loss = from_torch(loss)
