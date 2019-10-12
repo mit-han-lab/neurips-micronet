@@ -17,14 +17,17 @@ For more details, see our write-up: [report](report.pdf)
 
 ## Submission 
 
-| ID  | Notebook  | Sparsity (%) | Quantization | Test PPL | **Score** |
+| ID  | Notebook  | Sparsity (%) | Quantization (Bit)| Test PPL | **Score** |
 | --- |:---------:| --------:|-------------:|---------:|----------:|
 | 1 | [Notebook1](micronet_challenge-wikitext_103-1.ipynb)| 42.12 | 9 | 34.95 | **0.0482** |
 | 2 | [Notebook2](micronet_challenge-wikitext_103-2.ipynb)| 40.12 | 9 | 34.65 | **0.0485** |
 | 3 | [Notebook3](micronet_challenge-wikitext_103-3.ipynb)| 33.85 | 8 | 34.95 | **0.0475** |
 
 Our best submission has score **0.0475**.
-To verify test perplexity and score calculation, please refer to the corresponding IPython Notebook.
+
+## Verification
+To verify test perplexity and score calculation, please refer to the corresponding IPython Notebooks. 
+Before running the notebooks, it's required to download the data ("cache/" folder) at: [data](link) 
 
 
 ## FAQ
