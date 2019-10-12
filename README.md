@@ -8,7 +8,7 @@ The codebase consists of:
 * A write-up which describes our methodology and calculations in details
 * Three model paths of our submissions (in WikiText-103)
 
-*Our codebase runs on: Python 3.6.8 and Pytorch 1.1.0*
+*We run our codebase on Python 3.6.8 and Pytorch 1.1.0*
 
 ## Method 
 We use an efficient primitive modified based on Transformer-XL. Specifically, we make use of shorter attention length, trainable cache, Hebian updates, and a tied adaptive embedding and softmax layer.
