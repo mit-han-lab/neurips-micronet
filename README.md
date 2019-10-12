@@ -1,4 +1,4 @@
-# MicroNet: MuLan
+# MicroNet: Team MuLan
 
 ## Introduction
 This codebase is our submission for MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
