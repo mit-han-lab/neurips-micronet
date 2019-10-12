@@ -4,7 +4,7 @@
 This codebase is our submission for MicroNet Challenge on the WikiText-103 Language Modeling task.
 
 The codebase consists of:
-* IPython notebooks which verify test perplexity and walk through the calculations (storage and FLOP)
+* IPython notebooks which verify test perplexity and calculate the final score
 * A write-up which describes our methodology and calculations in details
 * Three model paths of our submissions (in WikiText-103)
 
@@ -23,5 +23,8 @@ For more details, see our write-up: [report](report.pdf)
 | 3 | [Notebook3](micronet_challenge-wikitext_103-3.ipynb)| 33.85 | 8 | 34.95 | **0.0475** |
 
 Our best submission has score **0.0475**.
+To verify test perplexity and score calculation, please refer to the corresponding IPython Notebook.
+
+
 
 
