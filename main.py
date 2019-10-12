@@ -162,6 +162,7 @@ def evaluate(c, data, net):
             inputs, labels = x[:-1], x[1:]
 
             preds = net.forward(inputs, labels, prevs=prevs)
+            prevs = preds['state']
             losses.append(preds['loss'])
             weights.append(labels.size(0))
         weights = np.array(weights)
