@@ -23,8 +23,7 @@ For more details, see our write-up: [report](report.pdf)
 | 2 | [Notebook2](micronet_challenge-wikitext_103-2.ipynb)| 40.12 | 9 | 34.65 | **0.0485** |
 | 3 | [Notebook3](micronet_challenge-wikitext_103-3.ipynb)| 33.85 | 8 | 34.95 | **0.0475** |
 
-Our best submission has score **0.0475**.
-For calculation, we follow: https://micronet-challenge.github.io/scoring_and_submission.html
+Our best submission has [score](https://micronet-challenge.github.io/scoring_and_submission.html) **0.0475**.
 
 ## Verification
 To verify test perplexity and score calculation, please refer to the corresponding IPython Notebooks. 
