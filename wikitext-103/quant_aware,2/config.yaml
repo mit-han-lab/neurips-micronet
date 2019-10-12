@@ -1,0 +1,35 @@
+cache_lambda_init: 0.07
+cache_theta_init: 0.016
+compress: /data/scratch/zxyan/micronet/wikitext-103/quant_aware,2/distiller.yaml
+cutoffs:
+- 3500
+- 25000
+disable_cache_training: true
+dropout: 0
+eval_batch: 1
+eval_chunk: 4096
+lr: 0.0001
+model: /data/scratch/zxyan/micronet/quantized_model.py
+model_class: Transformer
+n_cache: 2000
+n_embed: 256
+n_embeds:
+- 256
+- 64
+- 4
+n_head: 8
+n_inner: 768
+n_k: 24
+n_layers: 8
+n_seq: 96
+n_v: 24
+n_vocab: 267735
+opt_level: O0
+step_eval: 1
+step_save: 1000
+step_warmup: 0
+steps_per_epoch: 1000
+train_batch: 1
+train_chunk: 1152
+use_cache: true
+vocab_sorted: true
