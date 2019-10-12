@@ -1,9 +1,40 @@
-import distiller
-import distiller.modules as D
-from u import *
-from data import *
+try:
+    import distiller
+except ImportError:
+    pass
+from u import * # util functions
+from data import * # data loader
 
-from IPython import embed
+distiller_vs_explicit = 'distiller'
+
+class ExplicitQuantize(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('max_abs', torch.tensor(1.0))
+        self.register_buffer('inv_scale', torch.tensor(1.0))
+
+    def forward(self, x):
+        x = x.clamp(min=-self.max_abs, max=self.max_abs)
+        return torch.round(x / self.inv_scale) * self.inv_scale
+        
+class ExplicitReLUQuantize(ExplicitQuantize):
+    def forward(self, x):
+        # We can treat this as a fake fused quantized relu
+        return super(ExplicitReLUQuantize, self).forward(x.relu())
+
+def Quantize():
+    if distiller_vs_explicit == 'distiller':
+        # Distiller will handle this during training and wrap it with range_linear.FakeQuantizationWrapper
+        return nn.Identity()
+    elif distiller_vs_explicit == 'explicit':
+        # At evaluation time, we explicitly perform the fake quantization in our code so it's easily verifiable
+        return ExplicitQuantize()
+
+def ReLUQuantize():
+    if distiller_vs_explicit == 'distiller':
+        return nn.ReLU()
+    elif distiller_vs_explicit == 'explicit':
+        return ExplicitReLUQuantize()
 
 class AdaptiveEmbedding(nn.Module):
     def __init__(self, c):
@@ -74,12 +105,6 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         lam = torch.tensor(c.cache_lambda_init)
         self.cache_lambda_inv_sigmoid = nn.Parameter((lam / (1 - lam)).log())
 
-        self.cat_keys = lambda *x: torch.cat(x) #D.Concat()
-        self.cat_vals = lambda *x: torch.cat(x) #D.Concat()
-        self.mul_h_keys = torch.matmul # D.Matmul()
-
-        self.cat_h_clusters = lambda *x: torch.cat(x, dim=1)#D.Concat(dim=1)
-
     def query_cache(self, hidden, target):
         # assume n_batch = 1
         c = self.c
@@ -92,13 +117,13 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             cache_values = target
         else:
             n_cache = cache_keys.size(0)
-            cache_keys = self.cat_keys(cache_keys.detach(), hidden)
+            cache_keys = torch.cat((cache_keys.detach(), hidden))
             cache_values = torch.cat((cache_values, target))
         cache_keys = cache_keys[-(c.n_cache + n_seq):]
         cache_values = cache_values[-(c.n_cache + n_seq):]
         
         self.last_theta = theta = F.softplus(self.cache_theta_inv_softplus)
-        attn = theta * F.pad(self.mul_h_keys(hidden, cache_keys.t()), (c.n_cache - n_cache, 0), value=-1e8 if hidden.dtype == torch.float32 else -np.inf) # (n_s, n_c + n_s)
+        attn = theta * F.pad(hidden.mm(cache_keys.t()), (c.n_cache - n_cache, 0), value=-1e8) # (n_s, n_c + n_s)
         # (n_s, n_cache)
         logprobs = attn.reshape(-1).unfold(0, c.n_cache, attn.size(1) + 1).log_softmax(dim=1)
         indices = F.pad(cache_values, (c.n_cache - n_cache, 0), value=-1).unfold(0, c.n_cache, 1)[:n_seq]
@@ -120,7 +145,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         
         cache_logprob = self.query_cache(hidden, target)
 
-        head_logit = self.cat_h_clusters(self.layers[0](hidden), self.clusters(hidden))
+        head_logit = torch.cat((self.layers[0](hidden), self.clusters(hidden)), dim=1)
 
         head_logprob = head_logit.log_softmax(dim=1)
 
@@ -165,44 +190,40 @@ class Decoder(nn.Module):
         n_embed = c.n_embed
        
         self.ln1 = nn.LayerNorm(n_embed)
-        
+        self.quant_ln1 = Quantize()
+
         self.qkv = nn.Linear(n_embed, c.n_head * (2 * c.n_k + c.n_v))
-        self.quant1 = nn.Identity() # for quantization purpose
+        self.quant_qkv = Quantize()
+
         self.pos_emb = nn.Parameter(torch.Tensor(c.n_k, c.n_seq + 1))
         nn.init.normal_(self.pos_emb, 0, 0.02)
 
+        self.quant_attn = Quantize()
+        self.quant_attnv = Quantize()
+
         self.out = nn.Linear(c.n_head * c.n_v, n_embed, bias=False)
-        self.quant2 = nn.Identity()
         self.dropout = nn.Dropout(c.dropout)
 
         self.ln2 = nn.LayerNorm(c.n_embed)
+        self.quant_ln2 = Quantize()
+
         self.fc = nn.Sequential(
             nn.Linear(c.n_embed, c.n_inner),
-            nn.ReLU(), # quantize
+            ReLUQuantize(),
             nn.Dropout(c.dropout),
             nn.Linear(c.n_inner, c.n_embed),
-            nn.Identity(), # quantize
+            Quantize(),
             nn.Dropout(c.dropout),
         )
         self.c = c
 
-        self.split_q_kv = lambda x: torch.split(x, [c.n_k, c.n_k + c.n_v], dim=-1) #D.Split([c.n_k, c.n_k + c.n_v], dim=-1)
-        self.cat_pad_kv = lambda *x: torch.cat(x) #D.Concat()
-        self.split_k_v = lambda x: torch.split(x, [c.n_k, c.n_v], dim=2)#D.Split([c.n_k, c.n_v], dim=2)
-        self.mul_q_k = torch.bmm #D.BatchMatmul()
-        self.mul_q_e = torch.matmul #D.Matmul()
-        self.add_qk_qe = torch.add #D.EltwiseAdd()
-        self.mul_attn_v = torch.bmm #D.BatchMatmul()
-        self.add_in_attn = torch.add #D.EltwiseAdd()
-        self.add_in_attn_fc = torch.add #D.EltwiseAdd()
-    
     def forward(self, x, prev=None):
         # x: (n_group * n_seq, n_batch, n_embed)
         # pos_emb: (n_k, n_seq + 1)
         # mask: (2 * n_seq, 2 * n_seq) parallelogram
         
         c = self.c
-        n_s = min(c.n_seq, x.size(0))
+        n_s = c.n_seq
         n_g = x.size(0) // n_s
         n_b = x.size(1)
         n_h = c.n_head
@@ -210,41 +231,46 @@ class Decoder(nn.Module):
         n_k = c.n_k
         n_v = c.n_v
         
-        qkv = self.quant1(self.qkv(self.ln1(x))).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
-        q, kv = self.split_q_kv(qkv)
+        qkv = self.quant_qkv(self.qkv(
+            self.quant_ln1(self.ln1(x))
+        )).reshape(n_g * n_s, n_b * n_h, 2 * n_k + n_v)
+        q, kv = qkv.split([n_k, n_k + n_v], dim=-1)
         
         q = q.reshape(n_g, n_s, n_b * n_h, n_k)
 
         padding = prev if prev is not None else torch.zeros((n_s, n_b * n_h, n_k + n_v), dtype=kv.dtype, device=kv.device)
-        kv = self.cat_pad_kv(padding, kv)
-        k, v = self.split_k_v(kv.unfold(0, 2 * n_s, n_s)) # (n_g, n_bh, n_kv, 2 * n_s)
+        kv = torch.cat((padding, kv))
+        k, v = kv.unfold(0, 2 * n_s, n_s).split([n_k, n_v], dim=2) # (n_g, n_bh, n_kv, 2 * n_s)
 
-        qk = self.mul_q_k(
+        qk = torch.bmm(
             q.transpose(1, 2).reshape(n_g * n_bh, n_s, n_k),
             k.reshape(n_g * n_bh, n_k, 2 * n_s)
         ).reshape(n_g, n_bh, n_s * 2 * n_s).unfold(2, n_s + 1, 2 * n_s + 1) # (n_g, n_bh, n_s, n_s + 1)
 
-        qe = self.mul_q_e(q, self.pos_emb).transpose(1, 2)
+        qe = torch.matmul(q, self.pos_emb).transpose(1, 2)
 
-        attn = self.add_qk_qe(qk, qe)
+        attn = qk + qe
         attn.mul_(n_k ** -0.5)
         
         attn = attn.softmax(dim=-1)
+        attn = self.quant_attn(attn)
 
         attn = F.pad(attn, (0, n_s))
         attn = attn.reshape(n_g, n_b * n_h, -1).unfold(2, 2 * n_s, 2 * n_s) # (n_g, n_bh, n_s, 2 * n_s)
 
-        attnv = self.mul_attn_v(attn.reshape(n_g * n_bh, n_s, 2 * n_s), v.transpose(2, 3).reshape(n_g * n_bh, 2 * n_s, n_v)).reshape(n_g, n_bh, n_s, n_v).transpose(1, 2)
+        attnv = torch.bmm(
+            attn.reshape(n_g * n_bh, n_s, 2 * n_s),
+            v.transpose(2, 3).reshape(n_g * n_bh, 2 * n_s, n_v)
+        ).reshape(n_g, n_bh, n_s, n_v).transpose(1, 2)
+        attnv = self.quant_attnv(attnv)
+
         attn_out = self.out(attnv.reshape(n_g * n_s, n_b, n_h * n_v)) # (n_g * n_s, n_b, n_embed)
-        attn_out = self.quant2(attn_out)
         attn_out = self.dropout(attn_out)
 
-        in_attn = self.add_in_attn(x, attn_out)
+        in_attn = x + attn_out
         
+        out = in_attn + self.fc(self.quant_ln2(self.ln2(in_attn)))
         next = kv[-n_s:].detach()
-
-        out = self.add_in_attn_fc(in_attn, self.fc(self.ln2(in_attn)))
-
         return out, next
 
 class Transformer(nn.Module):
@@ -253,12 +279,11 @@ class Transformer(nn.Module):
         self.c = c
         self.embed = AdaptiveEmbedding(c)
 
-        self.quant1 = nn.Identity()
         self.dropout1 = nn.Dropout(c.dropout)
 
         self.layers = nn.ModuleList(Decoder(c, i) for i in range(c.n_layers))
         
-        self.quant2 = nn.Identity()
+        self.quant = Quantize()
         self.dropout2 = nn.Dropout(c.dropout)
         
         self.loss = ProjectedAdaptiveLogSoftmax(c)
@@ -280,7 +305,6 @@ class Transformer(nn.Module):
             labels = torch.cat((labels, padding))
 
         x = self.embed(inputs)
-        x = self.quant1(x)
         x = self.dropout1(x)
 
         prevs = prevs or [None] * c.n_layers
@@ -289,7 +313,7 @@ class Transformer(nn.Module):
             x, prev = layer(x, prev=prev)
             nexts.append(prev)
         
-        x = self.quant2(x)
+        x = self.quant(x)
         x = self.dropout2(x)
 
         loss = self.loss(x.reshape(-1, x.size(2)), labels.reshape(-1))
