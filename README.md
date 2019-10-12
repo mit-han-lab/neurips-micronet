@@ -27,7 +27,7 @@ Our best submission has score **0.0475**.
 
 ## Verification
 To verify test perplexity and score calculation, please refer to the corresponding IPython Notebooks. 
-Before running the notebooks, it's required to download the data [here](https://www.dropbox.com/sh/nsj396bg6c4uy5a/AADlWpvbH7rD-Gku3HCt3_sDa?dl=0)  [data](link) and put the files in a newly created "cache" folder in the main directory.
+Before running the notebooks, it's required to download the data [here](https://www.dropbox.com/sh/nsj396bg6c4uy5a/AADlWpvbH7rD-Gku3HCt3_sDa?dl=0) and put the files in a newly created "cache" folder in the main directory.
 
 
 ## FAQ
