@@ -26,5 +26,7 @@ Our best submission has score **0.0475**.
 To verify test perplexity and score calculation, please refer to the corresponding IPython Notebook.
 
 
-
+## FAQ
+If you have any further questions about our submission, please don't hesitate reaching out to us through Github Issues :)
+Thanks!
 
