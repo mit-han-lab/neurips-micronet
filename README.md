@@ -8,6 +8,7 @@ The codebase consists of:
 * A write-up which describes our methodology and calculations in details
 * Three model paths of our submissions (in WikiText-103)
 
+Our codebase requires: python 3.6 and above
 
 ## Method 
 We use an efficient primitive modified based on Transformer-XL. Specifically, we make use of shorter attention length, trainable cache, Hebian updates, and a tied adaptive embedding and softmax layer.
