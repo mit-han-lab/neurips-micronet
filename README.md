@@ -4,7 +4,7 @@
 ## News
 Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13)(Start from 33:35) on the challenge in NeurIPS 2019, Vancouver.
 
-![talk_photo](talk_photo.png)
+![talk_photo](talk_photo.png =50x)
 
 
 
