@@ -2,7 +2,11 @@
 
 
 ## News
-Hanrui and Zhongxia gave a [talk](https://nips.cc/Conferences/2019/ScheduleMultitrack?event=15423) on the challenge in NeurIPS 2019, Vancouver.
+Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13)(Start from 33:35) on the challenge in NeurIPS 2019, Vancouver.
+
+![talk_photo](talk_photo.png)
+
+
 
 ## Introduction
 This codebase is the Champnion submission for NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
