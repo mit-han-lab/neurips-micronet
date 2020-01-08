@@ -4,13 +4,12 @@
 ## News
 Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13)(Start from 33:35) on the challenge in NeurIPS 2019, Vancouver.
 
-<img src="talk_photo.png" alt="drawing" width="220"/>
-
+<img src="talk_photo.png" alt="drawing" width="240"/>
 
 
 
 ## Introduction
-This codebase is the Champnion submission for NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
+This codebase is the Champion submission for NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
 
 Team Member: Demi Guo\*, Hanrui Wang\*, Zhongxia Yan\*, Phillip Isola, Song Han. (\*Equal Contribution)
 
