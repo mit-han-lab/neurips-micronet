@@ -1,7 +1,13 @@
 # MicroNet: Team MIT-HAN-Lab
 
+
+## News
+Hanrui and Zhongxia gave a [talk](https://nips.cc/Conferences/2019/ScheduleMultitrack?event=15423) on the challenge in NeurIPS 2019, Vancouver.
+
 ## Introduction
-This codebase is our submission for NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
+This codebase is the Champnion submission for NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html).
+
+Team Member: Demi Guo\*, Hanrui Wang\*, Zhongxia Yan\*, Phillip Isola, Song Han. (\*Equal Contribution)
 
 The codebase consists of:
 * IPython notebooks which verify test perplexity and calculate the final score
@@ -13,7 +19,7 @@ The codebase consists of:
 ## Method 
 We use an efficient primitive modified based on Transformer-XL. Specifically, we make use of shorter attention length, trainable cache, Hebian updates, and a tied adaptive embedding and softmax layer.
 After training our primitive model, we run knowlege distillation to get a better performance. Finally, we run prunning and quantization to futher compress the model.
-For more details, see our write-up: [report](report.pdf)
+For more details, see our write-up: [report].(report.pdf)
 
 ## Submission 
 
@@ -29,8 +35,12 @@ Our best submission has [score](https://micronet-challenge.github.io/scoring_and
 To verify test perplexity and score calculation, please refer to the corresponding IPython Notebooks. 
 Before running the notebooks, it's required to download the data [here](https://www.dropbox.com/sh/nsj396bg6c4uy5a/AADlWpvbH7rD-Gku3HCt3_sDa?dl=0) and put the files in a newly created "cache" folder in the main directory.
 
-
 ## FAQ
 If you have any further questions about our submission, please don't hesitate reaching out to us through Github Issues :)
 Thanks!
+
+## Contact
+Hanrui Wang (hanrui@mit.edu)
+
+
 
