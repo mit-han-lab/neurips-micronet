@@ -1,7 +1,7 @@
 from u import *
 from copy import deepcopy
 
-c_base = Config.from_args().setdefault(device='cuda', logger=False, step='max')
+c_base = Config.from_args().setdefault(device='cuda', logger=False, step='max', n_cache=0)
 state = c_base.load_state(c_base.step)
 c_base.step = state['step']
 

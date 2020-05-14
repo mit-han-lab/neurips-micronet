@@ -1,0 +1,35 @@
+cache_lambda_init: 0.07
+cache_theta_init: 0.016
+cutoffs:
+- 3500
+- 25000
+dropout: 0
+eval_batch: 1
+eval_chunk: 4096
+hebbian: true
+hebbian_T: 500
+hebbian_gamma: 0.01
+lr: 0.001
+n_cache: 2000
+n_embed: 256
+n_embeds:
+- 256
+- 64
+- 4
+n_head: 8
+n_inner: 768
+n_k: 24
+n_layers: 8
+n_seq: 128
+n_v: 24
+n_vocab: 267735
+opt_level: O0
+pos_emb: trained
+scheduler: cosine
+step_eval: 500
+step_save: 25000
+step_warmup: 1000
+steps: 200000
+train_batch: 24
+train_chunk: 1152
+use_cache: true

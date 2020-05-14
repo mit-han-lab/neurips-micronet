@@ -1,0 +1,431 @@
+policies:
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: embed_layers_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: embed_layers_1_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: embed_layers_2_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: embed_projections_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_0_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_0_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_0_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_0_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_1_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_1_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_1_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_1_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_2_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_2_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_2_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_2_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_3_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_3_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_3_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_3_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_4_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_4_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_4_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_4_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_5_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_5_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_5_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_5_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_6_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_6_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_6_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_6_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_7_qkv_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_7_out_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_7_fc_0_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: layers_7_fc_3_weight
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: loss_layers_1_bias
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: loss_layers_2_bias
+  starting_epoch: 0
+- ending_epoch: 175
+  frequency: 1
+  pruner:
+    instance_name: loss_projections_0_weight
+  starting_epoch: 0
+pruners:
+  embed_layers_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.165
+    initial_sparsity: 0.06
+    weights:
+    - embed.layers.0.weight
+  embed_layers_1_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.30000000000000004
+    initial_sparsity: 0.11249999999999999
+    weights:
+    - embed.layers.1.weight
+  embed_layers_2_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.3375
+    initial_sparsity: 0.165
+    weights:
+    - embed.layers.2.weight
+  embed_projections_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - embed.projections.0.weight
+  layers_0_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.30000000000000004
+    initial_sparsity: 0.165
+    weights:
+    - layers.0.fc.0.weight
+  layers_0_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.255
+    initial_sparsity: 0.11249999999999999
+    weights:
+    - layers.0.fc.3.weight
+  layers_0_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.255
+    weights:
+    - layers.0.out.weight
+  layers_0_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.3375
+    initial_sparsity: 0.165
+    weights:
+    - layers.0.qkv.weight
+  layers_1_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.375
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.1.fc.0.weight
+  layers_1_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.375
+    initial_sparsity: 0.165
+    weights:
+    - layers.1.fc.3.weight
+  layers_1_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.6000000000000001
+    initial_sparsity: 0.3375
+    weights:
+    - layers.1.out.weight
+  layers_1_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.255
+    weights:
+    - layers.1.qkv.weight
+  layers_2_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.165
+    weights:
+    - layers.2.fc.0.weight
+  layers_2_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.47250000000000003
+    initial_sparsity: 0.255
+    weights:
+    - layers.2.fc.3.weight
+  layers_2_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.5325
+    initial_sparsity: 0.30000000000000004
+    weights:
+    - layers.2.out.weight
+  layers_2_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.3375
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.2.qkv.weight
+  layers_3_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.165
+    weights:
+    - layers.3.fc.0.weight
+  layers_3_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.5025000000000001
+    initial_sparsity: 0.255
+    weights:
+    - layers.3.fc.3.weight
+  layers_3_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.5775
+    initial_sparsity: 0.3375
+    weights:
+    - layers.3.out.weight
+  layers_3_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.3.qkv.weight
+  layers_4_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.4.fc.0.weight
+  layers_4_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.4.fc.3.weight
+  layers_4_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.5549999999999999
+    initial_sparsity: 0.255
+    weights:
+    - layers.4.out.weight
+  layers_4_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.4.qkv.weight
+  layers_5_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.5.fc.0.weight
+  layers_5_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.5.fc.3.weight
+  layers_5_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.5325
+    initial_sparsity: 0.30000000000000004
+    weights:
+    - layers.5.out.weight
+  layers_5_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.41250000000000003
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.5.qkv.weight
+  layers_6_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.375
+    initial_sparsity: 0.165
+    weights:
+    - layers.6.fc.0.weight
+  layers_6_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.375
+    initial_sparsity: 0.165
+    weights:
+    - layers.6.fc.3.weight
+  layers_6_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.6000000000000001
+    initial_sparsity: 0.3375
+    weights:
+    - layers.6.out.weight
+  layers_6_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.6.qkv.weight
+  layers_7_fc_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.255
+    initial_sparsity: 0.11249999999999999
+    weights:
+    - layers.7.fc.0.weight
+  layers_7_fc_3_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.30000000000000004
+    initial_sparsity: 0.165
+    weights:
+    - layers.7.fc.3.weight
+  layers_7_out_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.4425
+    initial_sparsity: 0.21000000000000002
+    weights:
+    - layers.7.out.weight
+  layers_7_qkv_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.3375
+    initial_sparsity: 0.165
+    weights:
+    - layers.7.qkv.weight
+  loss_layers_1_bias:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.75
+    initial_sparsity: 0.615
+    weights:
+    - loss.layers.1.bias
+  loss_layers_2_bias:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.75
+    initial_sparsity: 0.165
+    weights:
+    - loss.layers.2.bias
+  loss_projections_0_weight:
+    class: AutomatedGradualPruner
+    final_sparsity: 0.3375
+    initial_sparsity: 0.165
+    weights:
+    - loss.projections.0.weight

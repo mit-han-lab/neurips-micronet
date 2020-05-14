@@ -237,8 +237,6 @@ def train(c):
             compression_scheduler.before_backward_pass(epoch, batch, steps_per_epoch, loss, False)
 
             opt.zero_grad()
-            if torch.isnan(loss):
-                import q; q.d()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), c.get('clip_grad', 0.5))

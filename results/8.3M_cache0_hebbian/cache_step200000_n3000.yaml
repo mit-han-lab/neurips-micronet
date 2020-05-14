@@ -1,0 +1,4 @@
+cache_lambda: 0.0954575
+cache_theta: 0.020584704
+n_cache: 3000
+use_cache: true

@@ -1,0 +1,29 @@
+cutoffs:
+- 3500
+- 25000
+disable_amp: false
+dropout: 0
+eval_batch: 1
+eval_chunk: 4096
+lr: 0.001
+n_embed: 256
+n_embeds:
+- 256
+- 64
+- 4
+n_head: 8
+n_inner: 768
+n_k: 24
+n_layers: 8
+n_seq: 64
+n_v: 24
+n_vocab: 267735
+opt_level: O0
+pos_emb: trained
+scheduler: cosine
+step_eval: 500
+step_save: 5000
+step_warmup: 1000
+steps: 200000
+train_batch: 48
+train_chunk: 576

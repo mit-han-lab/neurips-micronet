@@ -1,0 +1,16 @@
+policies:
+- ending_epoch: 20
+  frequency: 1
+  quantizer:
+    instance_name: linear_quantizer
+  starting_epoch: 0
+quantizers:
+  linear_quantizer:
+    bits_activations: 10
+    bits_bias: 10
+    bits_weights: 10
+    class: QuantAwareTrainRangeLinearQuantizer
+    ema_decay: 0.999
+    mode: SYMMETRIC
+    per_channel_wts: true
+    quantize_inputs: false

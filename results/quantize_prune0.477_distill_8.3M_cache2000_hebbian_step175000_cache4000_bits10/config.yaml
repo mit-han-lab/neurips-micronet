@@ -1,0 +1,35 @@
+bits: 10
+cache_lambda: 0.16189475027483996
+cache_theta: 0.019121508190512657
+compress: distiller_quantize.yaml
+cutoffs:
+- 3500
+- 25000
+dropout: 0
+eval_batch: 1
+eval_chunk: 4032
+lr: 0.0001
+model: quantize.Transformer
+n_cache: 4000
+n_embed: 256
+n_embeds:
+- 256
+- 64
+- 4
+n_head: 8
+n_inner: 768
+n_k: 24
+n_layers: 8
+n_seq: 96
+n_v: 24
+n_vocab: 267735
+opt_level: O0
+pos_emb: trained
+step_eval: 1
+step_save: 1000
+step_warmup: 0
+steps: 1
+steps_per_epoch: 1000
+train_batch: 1
+train_chunk: 1152
+use_cache: true

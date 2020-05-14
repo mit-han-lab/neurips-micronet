@@ -49,7 +49,7 @@ class SequentialIterator:
             yield batch_i.astype(np.int64)
 
     def __len__(self):
-        return len(range(0, self.span_i, c.eval_chunk))
+        return len(range(0, self.span_i, self.c.eval_chunk))
 
 class DistillationSampleIterator:
     def __init__(self, c, batch_size):

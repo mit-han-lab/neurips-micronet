@@ -88,8 +88,9 @@ def train(c, net, compression_scheduler=None):
                 time=time_model
             )).add_prefix('train_')
             step_result['lr'] = next(iter(opt.param_groups))['lr']
-            step_result['theta'] = preds['theta']
-            step_result['lambda'] = preds['lambda'].item()
+            if c.use_cache:
+                step_result['theta'] = preds['theta']
+                step_result['lambda'] = preds['lambda'].item()
 
             if compression_scheduler:
                 compression_scheduler.on_minibatch_end(epoch, minibatch_id=batch, minibatches_per_epoch=steps_per_epoch)
