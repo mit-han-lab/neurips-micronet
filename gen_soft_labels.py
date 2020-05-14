@@ -1,55 +1,10 @@
-from __future__ import absolute_import, print_function
-
-import subprocess, sys, os, re, tempfile, zipfile, gzip, io, shutil, string, random, itertools, pickle, json, yaml, gc
-from datetime import datetime
-from time import time
-from fnmatch import fnmatch
-from glob import glob
-from tqdm import tqdm
-from collections import OrderedDict, defaultdict, Counter
-import q
-qq = q
-import pandas as pd
-import numpy as np
-import warnings
-warnings.filterwarnings('ignore')
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-
-from apex import amp
-
 from u import *
-from model import get_net, Transformer
-from modules import hebbian_weight_update
-from optim import scheduler, get_opt
-from ut import count_params, to_torch, from_torch
-from data import SampleIterator, SequentialIterator
-from ut import Cache, Proj, Wiki, Data
-
+from model import Transformer
 
 class SequentialIteratorGenSoft:
-    def __init__(self, c, batch_size, split):
+    def __init__(self, c, batch_size):
         self.c = c
-        worker = c.get('worker')
-        if worker != None:
-            # self.tokens = (Cache / 'wikitext-103' / split + '.npy').load()
-            # print(self.tokens.shape)
-            # print(Cache / 'wikitext-103' / split + '.npy')
-            print(worker)
-            if worker == 7:
-                self.tokens = self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()[
-                              6720 * 1920 * (worker):]
-            else:
-                self.tokens = self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()[
-                              6720 * 1920 * (worker): 6720 * 1920 * (worker + 1)]
-            # self.tokens = self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()[6720*1920*(worker): 6720*1920*(worker)+10000]
-        else:
-            self.tokens = self.tokens = (Cache / 'wikitext-103' / ('sorted_' if c.vocab_sorted else '') + split + '.npy').load()
-
+        self.tokens = self.tokens = (Cache / 'wikitext-103' / 'sorted_train.npy').load()
         self.batch_size = batch_size
 
     def __iter__(self):
@@ -82,43 +37,30 @@ class SequentialIteratorGenSoft:
 
         return span_i // self.c.eval_chunk
 
-
 def gen_soft_labels(c):
     c.setdefault(hebbian=False, distributed=False)
-    net = get_net(c)
-    opt = get_opt(c, net)
-    net, opt, step = c.init_model(net, opt=opt, step='max', train=True)
+    net = Transformer(c)
+    net, step = c.init_model(net, step='max', train=False)
 
     print('generating soft labels...')
-    data_gen_tr = SequentialIteratorGenSoft(c, c.get('gen_soft_batch'), split='train')
-    # data_gen_tr = iter(data_gen_tr)
-    clear_gpu_memory()
+    data_gen_tr = SequentialIteratorGenSoft(c, 1)
     net.eval()
     with torch.no_grad():
         i = 0
         for batch in tqdm(data_gen_tr):
             x = to_torch(batch, c.device).t()
-            # print(x.size())
-            # print(x[0:20])
             inputs, labels = x[:-1], x[1:]
             probs, _ = net(inputs, labels)
 
-            # loss_hard = -torch.log(probs.gather(1, labels).squeeze(1)).mean()
-
-            values, indices = torch.topk(probs, c.get('topk'), dim=1)
+            values, indices = torch.topk(probs, c.topk, dim=1)
 
             indices_ = indices.cpu().numpy()
             values_ = values.cpu().numpy()
             labels_ = labels.cpu().numpy()
-            # print(indices_[0:5])
-            # print(labels_[0:5])
-            # exit(0)
-
 
             if probs.size(0) != inputs.size(0):
                 indices_ = indices_[-inputs.size(0):, :]
                 values_ = values_[-inputs.size(0):, :]
-                # labels_ = labels_[-inputs.size(0):, :]
 
             if i == 0:
                 all_soft_indices = indices_
@@ -127,35 +69,21 @@ def gen_soft_labels(c):
                 all_soft_indices = np.concatenate((all_soft_indices, indices_), axis=0)
                 all_soft_values = np.concatenate((all_soft_values, values_), axis=0)
 
-            # print(all_soft_indices.shape)
-            # print(all_soft_values.shape)
-
             i += 1
-            # if i > 100:
-            #     break
-        all_soft_indices = np.concatenate((all_soft_indices[0:1, :], all_soft_indices), axis=0)
-        all_soft_values = np.concatenate((all_soft_values[0:1, :], all_soft_values), axis=0)
-        np.save(c.get('file_out_path') + 'all_soft_indices' + str(c.get('worker')) + '.npy', all_soft_indices)
-        np.save(c.get('file_out_path') + 'all_soft_values' + str(c.get('worker')) + '.npy', all_soft_values)
+    all_soft_indices = np.concatenate((all_soft_indices[0:1, :], all_soft_indices), axis=0)
+    all_soft_values = np.concatenate((all_soft_values[0:1, :], all_soft_values), axis=0)
 
-        in_indices = np.load(c.get('file_out_path') + 'all_soft_indices' + str(c.get('worker')) + '.npy')
+    np.save(Cache / 'wikitext-103' / 'train_soft_labels.npy', all_soft_indices)
+    np.save(Cache / 'wikitext-103' / 'train_soft_probs.npy', all_soft_values)
+    print('Saved %s' % (Cache / 'wikitext-103' / 'train_soft_labels.npy'))
+    print('Saved %s' % (Cache / 'wikitext-103' / 'train_soft_probs.npy'))
 
-        cnt = 0.
-        # print(in_indices.shape)
-        # print(len(data.tokens))
-        for k in range(len(data_gen_tr.tokens)):
-            # print(data.tokens[k])
-            # print(in_indices[k])
-            if data_gen_tr.tokens[k] in in_indices[k]:
-                cnt += 1
-        print(cnt / len(data_gen_tr.tokens))
-
-
-
-
+    cnt = 0.
+    for k in range(len(data_gen_tr.tokens)):
+        if data_gen_tr.tokens[k] in all_soft_indices[k]:
+            cnt += 1
+    print('%s%% of the tokens are predicted within the top %s logits' % (100 * cnt / len(data_gen_tr.tokens), c.topk))
 
 if __name__ == '__main__':
     config = Config.from_args()
-    if config.get('gen_soft'):
-        gen_soft_labels(config)
-
+    gen_soft_labels(config)

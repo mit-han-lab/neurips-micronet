@@ -1,0 +1,16 @@
+quantizers:
+  linear_quantizer:
+    class: QuantAwareTrainRangeLinearQuantizer
+    bits_activations: 9
+    bits_weights: 9
+    bits_bias: 9
+    mode: 'SYMMETRIC'
+    ema_decay: 0.999   # Decay value for exponential moving average tracking of activation ranges
+    per_channel_wts: True
+    quantize_inputs: False
+policies:
+  - quantizer:
+      instance_name: linear_quantizer
+    starting_epoch: 0
+    ending_epoch: 20
+    frequency: 1

@@ -1,3 +1,6 @@
 [submodule "distiller"]
 	path = distiller
 	url = https://github.com/ZhongxiaYan/distiller.git
+[submodule "apex"]
+	path = apex
+	url = https://github.com/NVIDIA/apex
