@@ -21,6 +21,8 @@ Our work implements or make improvements to the following methods, integrating t
 * Pruning: we use the [Distiller implementation](https://nervanasystems.github.io/distiller/algo_pruning.html#automated-gradual-pruner-agp) of Automated Gradual Pruning
 * Quantization: we use the [Distiller implementation](https://nervanasystems.github.io/distiller/algo_quantization.html) of the quantization aware training of the symmetric range-based linear quantizer.
 
+Our best model achieves a validation perplexity of 34.1 and test perplexity of 35.0 on Wikitext-103, while using 1.8M 32-bit parameters and 8.8M 32-bit math operations.
+
 ## MicroNet
 The MicroNet challenge website can be found [here](https://micronet-challenge.github.io/). Our best model discussed below gets a MicroNet score of `0.0387`. Note that this is better than our score `0.0475` on the MicroNet website, since we previously had an evaluation error which miscalculated the number of math operations.
 
