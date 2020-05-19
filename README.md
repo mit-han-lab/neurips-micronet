@@ -1,7 +1,7 @@
 # MicroNet: Team MIT-HAN-Lab
 
 ## News
-Our work has been accepted by PMLR!
+Our work has been accepted by PMLR! [arXiv link](https://arxiv.org/abs/2005.07877)
 
 Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13)(Start from 33:35) on the challenge in NeurIPS 2019, Vancouver.
 
@@ -10,7 +10,7 @@ Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-tr
 ## Introduction
 This codebase provides the code, configurations, and commands for our submission to PMLR for representing our work in the NeurIPS 2019 MicroNet Challenge on the [WikiText-103 Language Modeling task](https://micronet-challenge.github.io/index.html). The information for our submission to NeurIPS 2019 MicroNet Challenge can be found [here](https://github.com/mit-han-lab/neurips-micronet/tree/master/neurips_micronet_challenge).
 
-Team Member: Zhongxia Yan, Hanrui Wang, Demi Guo, Song Han.
+Team members: Zhongxia Yan, Hanrui Wang, Demi Guo, Song Han.
 
 Our work implements or make improvements to the following methods, integrating them to create an efficient language model for the Wikitext-103 task
 * [Transformer-XL](https://arxiv.org/abs/1901.02860)
