@@ -3,7 +3,7 @@
 ## News
 Our work has been accepted by PMLR! [arXiv link](https://arxiv.org/abs/2005.07877)
 
-Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13)(Start from 33:35) on the challenge in NeurIPS 2019, Vancouver.
+Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13) (Starts from 26:17) on the challenge in NeurIPS 2019, Vancouver.
 
 <img src="neurips_micronet_challenge/talk_photo.png" alt="drawing" width="240"/>
 
