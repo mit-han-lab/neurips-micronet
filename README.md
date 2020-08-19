@@ -1,7 +1,7 @@
 # MicroNet: Team MIT-HAN-Lab
 
 ## News
-Our work has been accepted by PMLR! [arXiv link](https://arxiv.org/abs/2005.07877)
+Our work has been accepted by PMLR!  [PMLR link](http://proceedings.mlr.press/v123/yan20a.html); [arXiv link](https://arxiv.org/abs/2005.07877).
 
 Hanrui and Zhongxia gave a [talk](https://slideslive.com/38922007/competition-track-day-13) (Starts from 26:17) on the challenge in NeurIPS 2019, Vancouver.
 
